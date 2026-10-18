@@ -4,7 +4,7 @@ import tempfile
 import unittest
 
 from jellyfin_bangumi_ids.scan import (REVIEW, OK, apply_report, pick_anchor, rollback, scan_series,
-                                       scan_specials)
+                                       scan_specials, search_anchor)
 
 
 class FakeBgm:
@@ -262,6 +262,26 @@ class EpisodeParentAnchorTest(unittest.TestCase):
 
         sid, how, _ = pick_anchor(Bgm(), jf, show)
         self.assertEqual((sid, how), (1606, "episode-parent"))
+
+
+class SearchSizePreferenceTest(unittest.TestCase):
+    def test_same_title_prefers_matching_episode_count(self):
+        show = {"Id": "haruhi", "Name": "凉宫春日的忧郁", "ProductionYear": 2009}
+
+        class Bgm:
+            def search(self, keyword, limit=10):
+                return [{"id": 485, "name": "涼宮ハルヒの憂鬱", "name_cn": "凉宫春日的忧郁"},
+                        {"id": 1606, "name": "涼宮ハルヒの憂鬱 2009", "name_cn": "凉宫春日的忧郁"}]
+
+            def subject(self, sid):
+                return {"id": sid, "eps": None}
+
+            def episode_list(self, sid):
+                return [{"id": i} for i in range(14 if sid == 485 else 28)]
+
+        sid, how, notes = search_anchor(Bgm(), show, local_total=28)
+        self.assertEqual((sid, how), (1606, "search"))
+        self.assertTrue(any("episode count" in n for n in notes))
 
 
 class PreserveOrderTest(unittest.TestCase):

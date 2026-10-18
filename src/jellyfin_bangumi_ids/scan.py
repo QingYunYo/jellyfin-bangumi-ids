@@ -94,12 +94,38 @@ def anchor_plausible(bgm, series: Dict[str, Any], sid: int) -> bool:
     return any(name_match(key, name) for key in title_keys(series) for name in names if name)
 
 
-def search_anchor(bgm, series: Dict[str, Any]) -> Tuple[Optional[int], str, List[str]]:
-    """Search bgm by every stored title (localized + original); refuse weak matches."""
+def _eps_of(bgm, sid) -> int:
+    """Episode count of a subject, 0 when unknown.
+
+    The offline archive stores no ``eps`` field, so fall back to counting its
+    episode rows — which works for both backends.
+    """
+    try:
+        eps = int((bgm.subject(sid) or {}).get("eps") or 0)
+        if eps:
+            return eps
+    except Exception:
+        pass
+    try:
+        return len(bgm.episode_list(sid))
+    except Exception:
+        return 0
+
+
+def search_anchor(bgm, series: Dict[str, Any], local_total: Optional[int] = None
+                  ) -> Tuple[Optional[int], str, List[str]]:
+    """Search bgm by every stored title (localized + original); refuse weak matches.
+
+    Several subjects can carry the same title (a TV season and its recap, or two
+    seasons of one show).  When that happens, prefer the one whose episode count
+    is closest to ours — otherwise a 14-episode first season wins over the
+    28-episode season the library actually holds.
+    """
     keys = title_keys(series)
     year = series.get("ProductionYear")
     notes: List[str] = []
     seen: List[int] = []
+    matches: List[Dict[str, Any]] = []
     failed = 0
     for key in keys:
         try:
@@ -116,9 +142,23 @@ def search_anchor(bgm, series: Dict[str, Any]) -> Tuple[Optional[int], str, List
             cn = hit.get("name_cn") or ""
             jp = hit.get("name") or ""
             if any(name_match(k, t) for k in keys for t in (cn, jp) if t):
-                return int(hid), "search", notes
+                matches.append(hit)
+                continue
             if year and str(hit.get("date") or "").startswith(str(year)):
                 notes.append("year-hit:%s" % (cn or jp))
+    if matches:
+        if local_total and len(matches) > 1:
+            def _closeness(hit):
+                eps = _eps_of(bgm, hit.get("id"))
+                if not eps:
+                    return (2, 0, 0)
+                return (0, abs(eps - local_total), -eps)
+            matches.sort(key=_closeness)
+        best = matches[0]
+        if len(matches) > 1:
+            notes.append("title matched %d subjects, took %s by episode count"
+                         % (len(matches), best.get("name_cn") or best.get("name")))
+        return int(best["id"]), "search", notes
     if failed and failed == len(keys):
         return None, "search-failed", notes
     return None, "search-mismatch", notes
@@ -149,7 +189,8 @@ def pick_anchor(bgm, jf, series: Dict[str, Any], allow_search: bool = True
             notes.append("ignored implausible season id %s" % sid)
             sid, how = None, "none"
     if not sid and allow_search:
-        sid, how, extra = search_anchor(bgm, series)
+        local, _skipped = collect_local_episodes(jf, series)
+        sid, how, extra = search_anchor(bgm, series, local_total=len(local))
         notes.extend(extra)
     return sid, how, notes
 

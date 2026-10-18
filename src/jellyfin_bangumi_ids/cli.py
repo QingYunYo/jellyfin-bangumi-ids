@@ -13,7 +13,7 @@ from .anchor import run_anchor
 from .auto import scan_auto
 from .bangumi import Bangumi
 from .jellyfin import Jellyfin
-from .offline import ArchiveIndex, OfflineBangumi, find_archive
+from .offline import archive_hint, ArchiveIndex, OfflineBangumi, find_archive
 from .scan import apply_report, log, rollback, run_scan, run_specials
 from .season import load_mapping, scan_seasons
 from .transport import force_ipv4
@@ -188,7 +188,12 @@ def cmd_doctor(args: argparse.Namespace) -> int:
         except Exception as exc:
             print("archive   : %s (unreadable: %s)" % (archive, exc))
     else:
-        print("archive   : none (online only)")
+        hint = archive_hint(jf)
+        if hint:
+            print("archive   : %s (not readable from here; pass --archive DIR)"
+                  % hint)
+        else:
+            print("archive   : none (online only)")
     libs = jf.libraries()
     print("libraries : %d (%s)" % (len(libs), ", ".join(libs)) if libs else "libraries : none")
     start = time.time()

@@ -125,6 +125,17 @@ class ArchiveTestCase(unittest.TestCase):
             os.environ.pop("JBMID_ARCHIVE", None)
         self.assertIsNone(find_archive(None))
 
+    def test_find_archive_uses_program_data_path(self):
+        root = os.path.join(self.tmp, "config")
+        nested = os.path.join(root, "data", "bangumi", "archive")
+        write_archive(nested, SUBJECTS, EPISODES)
+
+        class Jf:
+            def get(self, path, params=None):
+                return {"ProgramDataPath": root, "InternalMetadataPath": os.path.join(root, "metadata")}
+
+        self.assertEqual(find_archive(Jf()), os.path.abspath(nested))
+
     def test_find_archive_reads_jellyfin_data_path(self):
         root = os.path.join(self.tmp, "jf")
         nested = os.path.join(root, "data", "bangumi", "archive")

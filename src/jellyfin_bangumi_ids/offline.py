@@ -64,12 +64,19 @@ def _candidates_from_jellyfin(jf) -> List[str]:
     except Exception:
         return []
     roots = []
-    for key in ("InternalMetadataPath", "DataPath", "MetadataPath"):
+    for key in ("ProgramDataPath", "InternalMetadataPath", "DataPath", "MetadataPath"):
         raw = info.get(key)
         if not raw:
             continue
         # InternalMetadataPath is <data>/metadata; DataPath is <data>
-        roots.append(os.path.dirname(raw.rstrip("/")) if key == "InternalMetadataPath" else raw.rstrip("/"))
+        if key == "ProgramDataPath":
+            # Jellyfin keeps everything below the program data dir; the plugin
+            # writes <ProgramDataPath>/data/bangumi/archive.
+            roots.append(raw.rstrip("/"))
+        elif key == "InternalMetadataPath":
+            roots.append(os.path.dirname(raw.rstrip("/")))
+        else:
+            roots.append(raw.rstrip("/"))
     out = []
     for root in roots:
         out.extend([os.path.join(root, "data", "bangumi", "archive"),
@@ -309,3 +316,9 @@ class OfflineBangumi:
     def describe(self) -> str:
         return "offline archive %s (%s)" % (
             self.label, ", ".join("%s=%d" % kv for kv in sorted(self.index.counts().items())))
+
+def archive_hint(jf) -> Optional[str]:
+    """First archive path Jellyfin points at, whether or not we can read it."""
+    for path in _candidates_from_jellyfin(jf):
+        return os.path.abspath(path)
+    return None

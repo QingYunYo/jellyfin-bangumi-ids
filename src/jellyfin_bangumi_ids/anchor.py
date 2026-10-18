@@ -10,7 +10,7 @@ from __future__ import annotations
 import json
 from typing import Any, Dict, Optional, Tuple
 
-from .scan import anchor_plausible, log, season_anchor, series_anchor, title_keys
+from .scan import collect_local_episodes, anchor_plausible, log, season_anchor, series_anchor, title_keys
 
 
 def derive_anchor(bgm, jf, series: Dict[str, Any]) -> Tuple[Optional[int], str]:
@@ -22,7 +22,8 @@ def derive_anchor(bgm, jf, series: Dict[str, Any]) -> Tuple[Optional[int], str]:
     if sid:
         return sid, how
     from .scan import search_anchor
-    sid, how, _notes = search_anchor(bgm, series)
+    local, _skipped = collect_local_episodes(jf, series)
+    sid, how, _notes = search_anchor(bgm, series, local_total=len(local))
     return sid, how if sid else "none"
 
 
