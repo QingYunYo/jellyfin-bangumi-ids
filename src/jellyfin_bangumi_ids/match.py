@@ -7,11 +7,13 @@ import unicodedata
 from typing import Any, Dict, List, Sequence, Tuple
 
 SPECIAL_RE = re.compile(
-    r"(番外|OVA|OAD|特别篇|特別篇|总集篇|總集篇|特典|花絮|预告|預告|NCOP|NCED|(^|[^A-Za-z])SP\d*)",
+    r"(番外|OVA|OAD|特别篇|特別篇|总集篇|總集篇|特典|花絮|预告|預告|谈话|對談|座谈|NCOP|NCED|(^|[^A-Za-z])SP\d*)",
     re.IGNORECASE,
 )
 BRACKET_TITLE_RE = re.compile(r"[「『](.+?)[」』]")
 DROP_NOISE_RE = re.compile(r"\[[^\]]*\]|S\d{1,2}E\d{1,3}|#\d+", re.IGNORECASE)
+# Scraped titles often carry a translation in brackets: ``使徒、来袭（ANGEL ATTACK）``.
+PAREN_RE = re.compile(r"[（(][^）)]*[）)]")
 SEPARATORS = (" - ", " – ", " — ", "／", "/")
 
 
@@ -72,6 +74,7 @@ def variants(name: str) -> List[str]:
     for hit in BRACKET_TITLE_RE.findall(raw):
         add(hit)
     add(DROP_NOISE_RE.sub(" ", raw))
+    add(PAREN_RE.sub(" ", raw))
     for sep in SEPARATORS:
         if sep in raw:
             add(raw.split(sep)[-1])

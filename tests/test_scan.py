@@ -317,3 +317,42 @@ class BorrowedSpecialTest(unittest.TestCase):
         self.assertIsNone(clear[0]["bgm_id"])
         apply_report(jf, {"series": [entry]})
         self.assertIn(("sp", None), jf.writes)
+
+
+class TalkEpisodeTest(unittest.TestCase):
+    def test_bonus_talk_segments_are_specials(self):
+        from jellyfin_bangumi_ids.match import is_special
+        self.assertTrue(is_special("新保和丝茉茉的谈话"))
+        self.assertTrue(is_special("第5话 座谈会"))
+        self.assertFalse(is_special("叽，帮忙"))
+
+
+class PositionalMatchTest(unittest.TestCase):
+    def test_order_carries_translated_titles(self):
+        from jellyfin_bangumi_ids.scan import _positional_evidence
+        pairs = [(i, i) for i in range(25)]
+        self.assertTrue(_positional_evidence(25, 28, pairs, 1.0))
+        self.assertFalse(_positional_evidence(25, 40, pairs, 1.0))   # pool far bigger
+        self.assertFalse(_positional_evidence(25, 28, pairs, 0.8))   # gaps left
+
+    def test_duplicate_pairs_are_not_evidence(self):
+        from jellyfin_bangumi_ids.scan import _positional_evidence
+        pairs = [(i, 0) for i in range(25)]
+        self.assertFalse(_positional_evidence(25, 26, pairs, 1.0))
+
+
+class SeasonRescueTest(unittest.TestCase):
+    def test_arc_outside_the_chain_is_searched_per_season(self):
+        pool_a = [{"id": 11, "name_cn": "A物语 其一", "name": "A物语 其一"},
+                  {"id": 12, "name_cn": "A物语 其二", "name": "A物语 其二"}]
+        pool_c = [{"id": 21, "name_cn": "C物语 其一", "name": "C物语 其一"},
+                  {"id": 22, "name_cn": "C物语 其二", "name": "C物语 其二"}]
+        bgm = FakeBgm({1: pool_a, 2: pool_c}, names={1: "合集"},
+                      results={"C物语": [{"id": 2, "name_cn": "C物语"}]})
+        jf = FakeJf({"Id": "x", "Name": "合集", "ProviderIds": {"Bangumi": "1"}},
+                    [(1, [("i1", "A物语 其一"), ("i2", "A物语 其二")]),
+                     (2, [("i3", "C物语 其一"), ("i4", "C物语 其二")])])
+        entry = scan_series(jf, bgm, jf.series)
+        self.assertEqual(entry["status"], OK, entry.get("reason"))
+        self.assertEqual(entry["coverage"], 1.0)
+        self.assertTrue(any("season rescue" in note for note in entry["notes"]))

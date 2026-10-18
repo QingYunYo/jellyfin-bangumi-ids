@@ -455,6 +455,18 @@ Shapes season alignment resolves:
 
 The report's `notes` spells it out: `season map 1:S1->95225 2:S2->109386`.
 
+Two more shapes are recovered without a monotone chain:
+
+- **the arc is ordered differently** (Monogatari puts `花物语` before `终物语`, the reverse of
+  Bangumi's `sort`): any chain-wide alignment fights itself. Such a season searches Bangumi with its
+  own titles (`花物语 第变话 …` → search "花物语") and first tries what is left over inside chain
+  subjects (`业物语` hides in the 3 episodes of `外传季` other seasons did not take); once aligned it
+  is written on its own and the report says `season rescue <query> -> <subject>`.
+- **translations do not overlap at all** (EVA local titles carry English subtitles, Bangumi keeps
+  only Chinese): when the monotone pairing covers ≥ 98% of local episodes, uses ≥ 85% of the pool and
+  the pool is at most 3 episodes longer, order alone is accepted and the report says
+  `positional match`. Broadcast-order libraries (Haruhi) never trip this — their title coverage is 22%.
+
 **When it writes**: counts are equal, or (counts are close + hit rate ≥ 90% + mean similarity
 ≥ 0.55). If neither holds, the show goes to `review` and not a single episode is touched.
 
@@ -479,6 +491,9 @@ The report's `notes` spells it out: `season map 1:S1->95225 2:S2->109386`.
 | single-episode movies or unaired seasons sit on the chain | season alignment may skip whole runs instead of inflating the pool |
 | the chain wrongly includes a "season 2" | size guard rejects it (13 episodes vs 26 → `review`) |
 | titles are pure Japanese or pure numbers | positional mapping when counts match, flagged in the report |
+| local order disagrees with Bangumi's `sort` | that season searches for its own subject and aligns alone (`season rescue`) |
+| titles carry English subtitles, translations differ | order accepted at 98% local + 85% pool coverage (`positional match`) |
+| bonus talk segments mixed into the main season | treated as specials, kept out of the pool |
 | specials in Season 0 or in the title | excluded from regular modes; `special` mode uses `type=1` |
 | the same show twice (`/strm` + `/hdd`) | scanned independently, no shared state |
 

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import re
 import sys
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -290,6 +291,114 @@ def _size_ok(local: int, pool: int) -> bool:
     return abs(pool - local) <= max(2, int(0.15 * max(local, 1)))
 
 
+
+_SEASON_QUERY_SPLIT = re.compile(r"[\s（(·・『「/]")
+
+
+def _season_queries(group: List[Dict[str, Any]]) -> List[str]:
+    """Titles that could name the arc a season holds, most common first.
+
+    Local seasons of a franchise are often just ``第6季``; the arc name survives in the
+    episode titles (``花物语 第变话 骏河·恶魔 其一``), so the leading token is the query.
+    """
+    counts: Dict[str, int] = {}
+    for ep in group:
+        head = _SEASON_QUERY_SPLIT.split((ep.get("Name") or "").strip(), 1)[0]
+        head = head.strip(" -–—:：")
+        if 2 <= len(head) <= 14:
+            counts[head] = counts.get(head, 0) + 1
+    return [q for q, _ in sorted(counts.items(), key=lambda kv: (-kv[1], kv[0]))][:3]
+
+
+def _pairs_mean(local: List[Dict[str, Any]], pool: List[Dict[str, Any]],
+                pairs: List[Tuple[int, int]]) -> float:
+    if not pairs:
+        return 0.0
+    return sum(similarity(local[i].get("Name") or "",
+                          pool[j].get("name_cn") or pool[j].get("name") or "")
+               for i, j in pairs) / len(pairs)
+
+
+def _better(coverage: float, mean_sim: float, best: Optional[Dict[str, Any]]) -> bool:
+    if best is None:
+        return True
+    if coverage != best["coverage"]:
+        return coverage > best["coverage"]
+    return mean_sim > best.get("mean_sim", 0.0)
+
+
+def _rescue_seasons(groups: List[List[Dict[str, Any]]], covered: set, bgm,
+                    used_episode_ids: set, threshold: float,
+                    chain_subjects: Optional[List[int]] = None) -> List[Dict[str, Any]]:
+    """Find a subject for seasons the chain cannot place, one search per season.
+
+    Franchises whose library order differs from Bangumi's ``sort`` (Monogatari puts
+    ``花物语`` before ``终物语``) break every monotone alignment. A season of its own
+    still matches one subject by title, so it is aligned against that pool alone.
+    """
+    out: List[Dict[str, Any]] = []
+    for number, group in enumerate(groups, 1):
+        if not group or number in covered:
+            continue
+        best: Optional[Dict[str, Any]] = None
+        # A whole arc can hide in the leftovers of a subject another season already
+        # consumed (业物语 lives in 外传季 after 愚物语/抚物语/忍物语 took the rest).
+        for sid in chain_subjects or []:
+            try:
+                residual = [e for e in bgm.episode_list(sid)
+                            if str(e["id"]) not in used_episode_ids]
+            except Exception:
+                continue
+            if not residual:
+                continue
+            pairs, _ = _align_segment(group, residual, threshold)
+            coverage = len(pairs) / float(len(group))
+            mean_sim = _pairs_mean(group, residual, pairs)
+            if coverage >= 0.6 and mean_sim >= 0.4 and _better(coverage, mean_sim, best):
+                best = {"group": group, "pool": residual, "pairs": pairs, "subject": sid,
+                        "query": "residual", "coverage": coverage, "mean_sim": mean_sim}
+        for query in _season_queries(group):
+            try:
+                hits = bgm.search(query) or []
+            except Exception:
+                continue
+            for hit in hits[:5]:
+                try:
+                    sid = int(hit.get("id"))
+                except (TypeError, ValueError):
+                    continue
+                try:
+                    pool = bgm.episode_list(sid)
+                except Exception:
+                    continue
+                pool = [e for e in pool if str(e["id"]) not in used_episode_ids]
+                if not pool:
+                    continue
+                pairs, _ = _align_segment(group, pool, threshold)
+                coverage = len(pairs) / float(len(group))
+                mean_sim = _pairs_mean(group, pool, pairs)
+                if coverage >= 0.6 and mean_sim >= 0.4 and _better(coverage, mean_sim, best):
+                    best = {"group": group, "pool": pool, "pairs": pairs, "subject": sid,
+                            "query": query, "coverage": coverage, "mean_sim": mean_sim}
+        if best:
+            out.append(best)
+    return out
+
+def _positional_evidence(local: int, pool: int, pairs: List[Tuple[int, int]],
+                         coverage: float) -> bool:
+    """Order alone can carry a match when titles were translated differently.
+
+    Requires every local episode paired to a distinct pool episode, >=85% of the pool
+    used, and a pool at most 3 episodes longer (a trailing movie does not shift ids).
+    """
+    if not pairs:
+        return False
+    distinct = len({j for _, j in pairs}) == len(pairs)
+    pool_cov = distinct and len({j for _, j in pairs}) / float(pool) if pool else 0.0
+    return bool(distinct and coverage >= 0.98 and pool_cov >= 0.85
+                and abs(local - pool) <= 3)
+
+
 def _match_segments(segments: List[Tuple[List[Dict[str, Any]], List[Dict[str, Any]], Any]],
                     threshold: float, strict_size: bool = True
                     ) -> Tuple[List[Dict[str, Any]], int, float, int, List[str], List[str]]:
@@ -328,8 +437,15 @@ def _match_segments(segments: List[Tuple[List[Dict[str, Any]], List[Dict[str, An
             if not _size_ok(len(local), len(pool)):
                 problems.append("size mismatch %d local vs %d pool" % (len(local), len(pool)))
             elif not sequenced and (coverage < 0.9 or mean_sim < 0.55):
-                problems.append("weak match: coverage %.0f%%, mean sim %.2f"
-                                % (coverage * 100, mean_sim))
+                # Titles differ between sources (local scrapes add translations, bgm keeps
+                # the plain one): a monotone pairing that covers every local episode and
+                # nearly every bgm episode is still evidence -- order alone pins the ids.
+                if _positional_evidence(len(local), len(pool), pairs, coverage):
+                    notes.append("positional match %d/%d episodes (titles differ between sources)"
+                                 % (len(pairs), len(pool)))
+                else:
+                    problems.append("weak match: coverage %.0f%%, mean sim %.2f"
+                                    % (coverage * 100, mean_sim))
         for i, j in pairs:
             ep, bgm_ep = local[i], pool[j]
             current = (ep.get("ProviderIds") or {}).get("Bangumi")
@@ -394,6 +510,25 @@ def scan_series(jf, bgm, series: Dict[str, Any], allow_search: bool = True,
                 problems = []
                 kept_notes = alt[5]
                 entry["notes"].append("season map %s" % plan.summary())
+    if problems:
+        # Last resort: seasons the chain cannot reach (library order differs from Bangumi's
+        # sort) get their subject searched by arc title and are aligned on their own.
+        covered = {e.get("season") for e in episodes}
+        used_episode_ids = {str(e.get("bgm_id")) for e in episodes}
+        rescued = _rescue_seasons(groups, covered, bgm, used_episode_ids, threshold, chain)
+        if rescued:
+            extra = _match_segments([(r["group"], r["pool"], r["pairs"]) for r in rescued],
+                                    threshold, strict_size=False)
+            if not extra[4]:
+                episodes = episodes + extra[0]
+                matched += extra[1]
+                sim_sum += extra[2]
+                kept_notes = list(kept_notes) + list(extra[5])
+                for item in rescued:
+                    entry["notes"].append("season rescue %s -> %d (%s)"
+                                          % (item["query"], item["subject"], item["group"][0].get("Name")))
+                if matched >= total_local:
+                    problems = []
     entry["notes"].extend(kept_notes)
     entry["coverage"] = matched / float(total_local) if total_local else 0.0
     entry["mean_sim"] = (sim_sum / matched) if matched else 0.0
