@@ -7,7 +7,7 @@ import unicodedata
 from typing import Any, Dict, List, Sequence, Tuple
 
 SPECIAL_RE = re.compile(
-    r"(番外|OVA|OAD|特别篇|特別篇|总集篇|總集篇|特典|花絮|预告|預告|谈话|對談|座谈|NCOP|NCED|(^|[^A-Za-z])SP\d*)",
+    r"(番外|OVA|OAD|特别篇|特別篇|总集篇|總集篇|特典|花絮|预告|預告|谈话|對談|座谈|NCOP|NCED|(^|[^A-Za-z])SP\d+)",
     re.IGNORECASE,
 )
 BRACKET_TITLE_RE = re.compile(r"[「『](.+?)[」』]")

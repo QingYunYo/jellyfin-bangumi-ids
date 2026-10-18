@@ -70,7 +70,10 @@
 - 全库回归（动漫库 89 部、离线档案）：`scan` 86 ok / 3 review → **89 ok / 0 review / 0 to write**，
   三部 review 全部转 ok 且库里 ID 一处未改；`verify` 维持 `2095 ids | dup 3 | low-sim 278 |
   disorder 22 | foreign 5 | anchors 0`；`auto --dry-run` 仍 `would write 0`。
-- 新增 4 个用例（花絮谈话、顺序认定、链外季救援），共 65 个。
+- `SP` 番外标记要求至少一位数字（`SP1`/`SP02`）：原先的 `SP\d*` 允许零位，
+  把 EVA 第 16 话 `致死之疾，然后…（Splitting of the Breast）` 的 `（Sp` 当成了 SP 标记，
+  整集被剔出正片池。全库确认只有这一处误伤，修正后 EVA 26 集全覆盖，`positional match` 不再触发。
+- 新增 5 个用例（花絮谈话、顺序认定、链外季救援、SP 标记需带数字），共 66 个。
 
 ## 0.1.1
 

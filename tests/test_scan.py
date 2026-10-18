@@ -356,3 +356,12 @@ class SeasonRescueTest(unittest.TestCase):
         self.assertEqual(entry["status"], OK, entry.get("reason"))
         self.assertEqual(entry["coverage"], 1.0)
         self.assertTrue(any("season rescue" in note for note in entry["notes"]))
+
+
+class SpecialMarkerTest(unittest.TestCase):
+    def test_sp_needs_a_number(self):
+        from jellyfin_bangumi_ids.match import is_special
+        self.assertTrue(is_special("SP1 特别篇"))
+        self.assertTrue(is_special("第3话 SP02"))
+        self.assertFalse(is_special("致死之疾，然后…（Splitting of the Breast）"))
+        self.assertFalse(is_special("Specials"))
