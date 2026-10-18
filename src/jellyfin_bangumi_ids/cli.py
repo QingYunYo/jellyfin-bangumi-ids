@@ -9,6 +9,7 @@ import time
 from typing import Any, Dict, List, Optional
 
 from . import __version__
+from .anchor import run_anchor
 from .auto import scan_auto
 from .bangumi import Bangumi
 from .jellyfin import Jellyfin
@@ -84,16 +85,25 @@ def cmd_scan(args: argparse.Namespace) -> int:
 def cmd_special(args: argparse.Namespace) -> int:
     jf, bgm = clients_with_source(args)
     report = run_specials(jf, bgm, library=args.library, limit=args.limit,
-                          verbose=True, out=args.out)
+                          verbose=True, out=args.out, clear_borrowed=args.clear_borrowed)
     summary = report["summary"]
     print("")
     print("series ok      : %d" % summary["series_ok"])
     print("series review  : %d" % summary["series_review"])
     print("specials       : %d matched" % summary["specials_matched"])
+    print("borrowed       : %d cleared" % summary.get("specials_cleared", 0))
     print("episodes       : %d to write" % summary["episodes_to_write"])
     print("report         : %s" % args.out)
     if summary["episodes_to_write"]:
         print("next           : jbmid apply %s --backup jbmid-backup-sp.json" % args.out)
+    return 0
+
+
+def cmd_anchor(args: argparse.Namespace) -> int:
+    jf, bgm = clients_with_source(args)
+    run_anchor(jf, bgm, args.series, library=args.library, sid=args.id, clear=args.clear,
+               force=args.force, dry_run=args.dry_run,
+               backup_path=None if args.no_backup else args.backup)
     return 0
 
 
@@ -218,7 +228,21 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--library", help="library name, e.g. Anime (case-insensitive)")
     p.add_argument("--limit", type=int)
     p.add_argument("--out", default="jbmid-specials.json")
+    p.add_argument("--clear-borrowed", action="store_true",
+                   help="clear SP ids that merely borrow a main episode's id")
     p.set_defaults(func=cmd_special)
+
+    p = sub.add_parser("anchor", help="set or repair the Bangumi id on a series")
+    common(p)
+    p.add_argument("--library")
+    p.add_argument("--series", required=True)
+    p.add_argument("--id", type=int, help="explicit Bangumi subject id")
+    p.add_argument("--clear", action="store_true", help="remove the series-level id")
+    p.add_argument("--force", action="store_true", help="accept an id that fails the title check")
+    p.add_argument("--backup", default="jbmid-anchor-backup.json")
+    p.add_argument("--no-backup", action="store_true")
+    p.add_argument("--dry-run", action="store_true")
+    p.set_defaults(func=cmd_anchor)
 
     p = sub.add_parser("apply", help="write the ids from a scan report")
     common(p)

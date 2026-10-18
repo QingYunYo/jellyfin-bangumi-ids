@@ -24,11 +24,58 @@ def series_anchor(series: Dict[str, Any]) -> Tuple[Optional[int], str]:
 
 
 def season_anchor(bgm, jf, series: Dict[str, Any]) -> Tuple[Optional[int], str]:
-    for season in jf.seasons(series["Id"]):
+    """Season ids by majority vote; a season without one uses its first episode's parent.
+
+    Seasons often carry no Bangumi id while their episodes do. Those episode ids are
+    ``type=0`` ids of the *subject* the season belongs to, so the first episode's
+    ``subject_id`` is exactly the anchor that is missing -- no title search needed.
+    """
+    seasons = jf.seasons(series["Id"])
+    votes: Dict[int, int] = {}
+    for season in seasons:
         pid = (season.get("ProviderIds") or {}).get("Bangumi")
         if pid and str(pid).isdigit():
-            return int(pid), "season-id"
+            votes[int(pid)] = votes.get(int(pid), 0) + 1
+    parent = episode_parent_vote(bgm, jf, series)
+    if parent and (not votes or parent != _majority(votes)):
+        return parent, "episode-parent"
+    if votes:
+        return _majority(votes), "season-id"
+    if parent:
+        return parent, "episode-parent"
     return None, "none"
+
+
+def _majority(votes: Dict[int, int]) -> int:
+    return max(votes.items(), key=lambda kv: kv[1])[0]
+
+
+def episode_parent_vote(bgm, jf, series: Dict[str, Any],
+                        per_season: int = 2) -> Optional[int]:
+    """The subject that the season's own episodes point at.
+
+    Season metadata is often stale or copied from a neighbouring entry (the
+    "Melancholy of Haruhi-chan" subject sits on a season of the TV show), while
+    each episode id unambiguously belongs to one subject. Voting over a couple of
+    episodes per season finds the subject the library actually holds.
+    """
+    votes: Dict[int, int] = {}
+    for season in jf.seasons(series["Id"]):
+        seen = 0
+        for ep in jf.season_episodes(season["Id"]):
+            pid = (ep.get("ProviderIds") or {}).get("Bangumi")
+            if not (pid and str(pid).isdigit()):
+                continue
+            try:
+                parent = bgm.episode(int(pid)).get("subject_id")
+            except Exception:  # an API failure must not become a wrong anchor
+                continue
+            if parent:
+                votes[int(parent)] = votes.get(int(parent), 0) + 1
+                seen += 1
+            if seen >= per_season:
+                break
+    return _majority(votes) if votes else None
 
 
 def anchor_plausible(bgm, series: Dict[str, Any], sid: int) -> bool:
@@ -79,8 +126,19 @@ def search_anchor(bgm, series: Dict[str, Any]) -> Tuple[Optional[int], str, List
 
 def pick_anchor(bgm, jf, series: Dict[str, Any], allow_search: bool = True
                 ) -> Tuple[Optional[int], str, List[str]]:
-    """Series id -> season id -> title search, discarding ids that do not describe this show."""
+    """Episode parents -> season ids -> series id -> title search.
+
+    Episode ids are the strongest evidence: each one belongs to exactly one subject,
+    so a vote over a couple of episodes per season cannot be fooled by stale season
+    metadata the way a copied ``ProviderIds`` value can.
+    """
     notes: List[str] = []
+    if allow_search:
+        parent = episode_parent_vote(bgm, jf, series)
+        if parent and anchor_plausible(bgm, series, parent):
+            return parent, "episode-parent", notes
+        if parent:
+            notes.append("ignored implausible episode parent %s" % parent)
     sid, how = series_anchor(series)
     if sid and not anchor_plausible(bgm, series, sid):
         notes.append("ignored implausible series id %s" % sid)
@@ -226,6 +284,10 @@ def scan_series(jf, bgm, series: Dict[str, Any], allow_search: bool = True,
             problems.append("empty Bangumi pool")
             continue
         pairs, sequenced = _align_segment(local, pool, threshold)
+        if sequenced and pairs:
+            pairs, kept = _keep_existing_ids(local, pool, pairs)
+            if kept:
+                entry["notes"].append("kept %d existing ids (library order differs from Bangumi)" % kept)
         coverage = len(pairs) / float(len(local))
         mean_sim = (sum(similarity(local[i].get("Name") or "",
                                    pool[j].get("name_cn") or pool[j].get("name") or "")
@@ -261,6 +323,23 @@ def scan_series(jf, bgm, series: Dict[str, Any], allow_search: bool = True,
     return entry
 
 
+def _keep_existing_ids(local: List[Dict[str, Any]], pool: List[Dict[str, Any]],
+                       pairs: List[Tuple[int, int]]) -> Tuple[List[Tuple[int, int]], int]:
+    """Keep stored ids when they are exactly the pool, merely in another order.
+
+    Broadcast-order libraries (Haruhi 2009) hold the right ids in a different order
+    than Bangumi's ``sort``. Positional alignment would silently rewrite all of them,
+    so when the stored ids form the pool itself, the stored order wins.
+    """
+    index = {str(p["id"]): j for j, p in enumerate(pool)}
+    existing = [str((e.get("ProviderIds") or {}).get("Bangumi") or "") for e in local]
+    if len(existing) != len(pool) or len(set(existing)) != len(existing):
+        return pairs, 0
+    if not all(x and x in index for x in existing):
+        return pairs, 0
+    return [(i, index[x]) for i, x in enumerate(existing)], len(local)
+
+
 def build_special_pool(bgm, chain: List[int]) -> List[Dict[str, Any]]:
     """All ``type=1`` (SP/OVA) episodes of the chain, in chain order."""
     pool: List[Dict[str, Any]] = []
@@ -285,7 +364,23 @@ def collect_local_specials(jf, series: Dict[str, Any]) -> List[Dict[str, Any]]:
     return out
 
 
-def scan_specials(jf, bgm, series: Dict[str, Any], min_sim: float = 0.55) -> Dict[str, Any]:
+def main_episode_ids(jf, series: Dict[str, Any]) -> set:
+    """Bangumi ids already used by main-season episodes -- what a special must not borrow."""
+    ids = set()
+    for season in jf.seasons(series["Id"]):
+        if (season.get("IndexNumber") or 0) < 1:
+            continue
+        for ep in jf.season_episodes(season["Id"]):
+            if is_special(ep.get("Name") or ""):
+                continue
+            pid = (ep.get("ProviderIds") or {}).get("Bangumi")
+            if pid:
+                ids.add(str(pid))
+    return ids
+
+
+def scan_specials(jf, bgm, series: Dict[str, Any], min_sim: float = 0.55,
+                  clear_borrowed: bool = False) -> Dict[str, Any]:
     """Match local SP/OVA episodes against the chain's ``type=1`` episodes."""
     name = series.get("Name") or ""
     entry: Dict[str, Any] = {"series": name, "series_id": series["Id"], "status": "review",
@@ -298,18 +393,17 @@ def scan_specials(jf, bgm, series: Dict[str, Any], min_sim: float = 0.55) -> Dic
     entry["anchor"], entry["anchor_how"] = anchor, how
     chain = bgm.chain(anchor)
     entry["chain"] = chain
-    pool = build_special_pool(bgm, chain)
-    if not pool:
-        entry["reason"] = "no SP/OVA episodes for this show on Bangumi"
-        return entry
     locals_ = collect_local_specials(jf, series)
     if not locals_:
         entry["reason"] = "no special episodes in the library"
         return entry
+    pool = build_special_pool(bgm, chain)
 
     local_names = [x["name"] for x in locals_]
     positional = False
-    if len(pool) == len(locals_) and len(pool) <= 3:
+    if not pool:
+        pairs = []
+    elif len(pool) == len(locals_) and len(pool) <= 3:
         # only a few SPs on the whole chain and the count matches: map by order, with a similarity floor
         pairs = [(i, i, episode_similarity(local_names[i], pool[i])) for i in range(len(pool))]
         pairs = [p for p in pairs if p[2] >= 0.25]
@@ -335,12 +429,40 @@ def scan_specials(jf, bgm, series: Dict[str, Any], min_sim: float = 0.55) -> Dic
             "old": item["old"], "bgm_id": new, "bgm_name": pool[j].get("name_cn") or pool[j].get("name"),
             "sim": round(sc, 2), "change": str(item["old"] or "") != new, "item_id": item["item"]["Id"],
         })
+    borrowed = 0
+    if clear_borrowed:
+        if not pool:
+            entry["notes"].append("no SP/OVA episodes on Bangumi")
+        main_ids = main_episode_ids(jf, series)
+        matched_idx = {i for i, _, _ in pairs}
+        for i, item in enumerate(locals_):
+            old = item["old"]
+            if i in matched_idx or not old or str(old) not in main_ids:
+                continue
+            # A shared id is only a borrow when that episode really is a different one.
+            # Bangumi files many OVAs as type=0 inside the main subject, so the stored id
+            # is right there even though it also sits on a main-season episode.
+            try:
+                bgm_ep = bgm.episode(int(old))
+            except Exception:
+                continue
+            title = bgm_ep.get("name_cn") or bgm_ep.get("name") or ""
+            if title and similarity(item["name"], title) >= 0.45:
+                continue
+            borrowed += 1
+            entry["episodes"].append({
+                "season": item["season"], "index": item["index"], "name": item["name"],
+                "old": old, "bgm_id": None, "bgm_name": "(cleared: borrowed from a main episode)",
+                "sim": None, "change": True, "item_id": item["item"]["Id"], "clear": True,
+            })
+    entry["borrowed_cleared"] = borrowed
     entry["to_write"] = sum(1 for e in entry["episodes"] if e["change"])
-    if matched == 0:
-        entry["reason"] = "no episode reached the similarity threshold"
+    if matched == 0 and not borrowed:
+        entry["reason"] = "no episode reached the similarity threshold" if pool \
+            else "no SP/OVA episodes for this show on Bangumi"
     elif positional and matched == len(pool):
         entry["status"] = OK
-    elif mean < min_sim:
+    elif mean < min_sim and not borrowed:
         entry["reason"] = "weak match: mean sim %.2f" % mean
     else:
         entry["status"] = "ok"
@@ -348,14 +470,14 @@ def scan_specials(jf, bgm, series: Dict[str, Any], min_sim: float = 0.55) -> Dic
 
 
 def run_specials(jf, bgm, library=None, limit=None, verbose=False,
-                 out: str = "jbmid-specials.json") -> Dict[str, Any]:
+                 out: str = "jbmid-specials.json", clear_borrowed: bool = False) -> Dict[str, Any]:
     series_list = jf.all_series(library_name=library)
     if limit:
         series_list = series_list[:limit]
     report: Dict[str, Any] = {"library": library, "mode": "special", "series": []}
     for i, series in enumerate(series_list, 1):
         try:
-            entry = scan_specials(jf, bgm, series)
+            entry = scan_specials(jf, bgm, series, clear_borrowed=clear_borrowed)
         except Exception as exc:  # noqa: BLE001 - one bad series must not kill the run
             entry = {"series": series.get("Name"), "series_id": series.get("Id"),
                      "status": "review", "reason": "error: %s" % exc, "episodes": [],
@@ -373,6 +495,7 @@ def run_specials(jf, bgm, library=None, limit=None, verbose=False,
         "series_review": len(report["series"]) - len(ok),
         "episodes_to_write": sum(e.get("to_write", 0) for e in ok),
         "specials_matched": sum(e.get("matched", 0) for e in report["series"]),
+        "specials_cleared": sum(e.get("borrowed_cleared", 0) for e in report["series"]),
     }
     with open(out, "w", encoding="utf-8") as fh:
         json.dump(report, fh, ensure_ascii=False, indent=1)
@@ -421,11 +544,14 @@ def apply_report(jf, report: Dict[str, Any], backup_path: Optional[str] = None,
     for entry in entries:
         log("[%s] %d episodes" % (entry["series"], len(entry.get("episodes") or [])))
         for ep in entry.get("episodes") or []:
+            target = ep.get("bgm_id")
+            if target in ("", "None"):
+                target = None
             if dry_run:
                 current = (jf.item(ep["item_id"]).get("ProviderIds") or {}).get("Bangumi")
-                result = {"ok": True, "before": current, "after": ep["bgm_id"], "collateral": {}}
+                result = {"ok": True, "before": current, "after": target, "collateral": {}}
             else:
-                result = jf.set_provider_id(ep["item_id"], "Bangumi", ep["bgm_id"])
+                result = jf.set_provider_id(ep["item_id"], "Bangumi", target)
             if result["before"] == result["after"]:
                 continue
             if not result["ok"]:

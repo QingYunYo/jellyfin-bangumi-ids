@@ -3,7 +3,7 @@ import os
 import tempfile
 import unittest
 
-from jellyfin_bangumi_ids.scan import (REVIEW, OK, apply_report, rollback, scan_series,
+from jellyfin_bangumi_ids.scan import (REVIEW, OK, apply_report, pick_anchor, rollback, scan_series,
                                        scan_specials)
 
 
@@ -211,3 +211,89 @@ class ChainTrimTest(unittest.TestCase):
         entry = scan_series(jf, bgm, jf.series)
         self.assertEqual(entry["chain"], [100, 200])
         self.assertEqual(entry["status"], REVIEW)
+
+
+class ProviderIdsFakeJf:
+    """FakeJf that also carries ProviderIds, so anchors can be read back."""
+
+    def __init__(self, series, seasons):
+        self.series = series
+        self._seasons = seasons          # [(season_no, subject_id, [(item_id, name, bangumi)])]
+        self.writes = []
+
+    def seasons(self, series_id):
+        return [{"Id": "s%d" % no, "IndexNumber": no,
+                 "ProviderIds": {"Bangumi": str(sid)} if sid else {}}
+                for no, sid, _ in self._seasons]
+
+    def season_episodes(self, season_id):
+        no = int(season_id[1:])
+        for n, _sid, eps in self._seasons:
+            if n == no:
+                return [{"Id": i, "Name": name, "IndexNumber": k + 1, "ParentIndexNumber": n,
+                         "ProviderIds": {"Bangumi": str(bgm)} if bgm else {}}
+                        for k, (i, name, bgm) in enumerate(eps)]
+        return []
+
+    def set_provider_id(self, item_id, provider, value):
+        self.writes.append((item_id, value))
+        return {"ok": True, "before": None, "after": value, "collateral": {}}
+
+    def item(self, item_id):
+        return {"Id": item_id, "ProviderIds": {}}
+
+
+class EpisodeParentAnchorTest(unittest.TestCase):
+    def test_stale_season_id_yields_to_episode_parent(self):
+        show = {"Id": "haruhi", "Name": "凉宫春日的忧郁", "ProviderIds": {"Bangumi": "1372"}}
+        jf = ProviderIdsFakeJf(show, [
+            (1, 1372, [("e1", "朝比奈实玖瑠的冒险", 5000), ("e2", "凉宫春日的忧郁 I", 5001)]),
+        ])
+
+        class Bgm:
+            def subject(self, sid):
+                return {"id": sid, "name": "凉宫春日的忧郁" if sid == 1606 else "小凉宫春日的忧郁"}
+
+            def episode(self, eid):
+                return {"id": eid, "subject_id": 1606}
+
+            def search(self, keyword, limit=10):
+                return []
+
+        sid, how, _ = pick_anchor(Bgm(), jf, show)
+        self.assertEqual((sid, how), (1606, "episode-parent"))
+
+
+class PreserveOrderTest(unittest.TestCase):
+    def test_broadcast_order_ids_are_not_rewritten(self):
+        show = {"Id": "s", "Name": "凉宫春日的忧郁", "ProviderIds": {"Bangumi": "1606"}}
+        bgm = FakeBgm({1606: [{"id": 5000, "sort": 1, "name_cn": "第一话"},
+                              {"id": 5001, "sort": 2, "name_cn": "第二话"}]},
+                      names={1606: "凉宫春日的忧郁"})
+        jf = ProviderIdsFakeJf(show, [
+            (1, 1606, [("e1", "朝比奈实玖瑠的冒险", 5001), ("e2", "凉宫春日的忧郁 I", 5000)]),
+        ])
+        entry = scan_series(jf, bgm, jf.series)
+        self.assertEqual(entry["status"], OK)
+        self.assertEqual(entry["to_write"], 0)
+        self.assertTrue(any("kept 2 existing ids" in n for n in entry["notes"]))
+
+
+class BorrowedSpecialTest(unittest.TestCase):
+    def test_borrowed_special_id_is_cleared(self):
+        show = {"Id": "s", "Name": "测试番", "ProviderIds": {"Bangumi": "1671"}}
+        bgm = FakeBgm({1671: [{"id": 500, "sort": 1, "name_cn": "第一集"}]},
+                      specials={1671: [{"id": 900, "sort": 1, "name_cn": "完全无关"}]},
+                      names={1671: "测试番"})
+        bgm.episode = lambda eid: {"id": eid, "name_cn": "完全无关"}
+        jf = ProviderIdsFakeJf(show, [
+            (0, None, [("sp", "番外篇 某物", 500)]),
+            (1, 1671, [("e1", "第一集", 500)]),
+        ])
+        entry = scan_specials(jf, bgm, show, clear_borrowed=True)
+        self.assertEqual(entry["status"], OK)
+        clear = [e for e in entry["episodes"] if e.get("clear")]
+        self.assertEqual(len(clear), 1)
+        self.assertIsNone(clear[0]["bgm_id"])
+        apply_report(jf, {"series": [entry]})
+        self.assertIn(("sp", None), jf.writes)

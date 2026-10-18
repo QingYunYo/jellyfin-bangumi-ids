@@ -32,7 +32,7 @@ Every Jellyfin episode carries a `ProviderIds.Bangumi` value, and that number is
 the Bangumi plugin looks at when reporting playback. This tool fills that number in correctly —
 **and touches nothing else**.
 
-Five modes; pick one based on how messy your library is (each is documented under
+Six modes; pick one based on how messy your library is (each is documented under
 [Modes in detail](#modes-in-detail)):
 
 | Mode | When to use | Command |
@@ -42,6 +42,7 @@ Five modes; pick one based on how messy your library is (each is documented unde
 | `auto` | Do it in one shot: let the tool find subjects by title and align by episode title | `jbmid auto` |
 | `special` | You also want bonus episodes (SP / OVA / recaps) synced | `jbmid special` → `jbmid apply` |
 | `verify` | Check which IDs are broken, before or after a repair — **read-only** | `jbmid verify` |
+| `anchor` | The anchor itself (the Bangumi ID on a series or season) is wrong | `jbmid anchor --series "Show"` |
 
 ## Install
 
@@ -218,7 +219,43 @@ episode whose title contains `OVA|SP|番外|总集篇`.
   positional mapping, but still requires a floor of 0.25 similarity.
 - The output is structurally identical to `scan`, so `apply` / `rollback` work unchanged.
 
-### 5. `verify`: read-only health check
+With `--clear-borrowed` it also fixes another kind of dirt: a special that merely **borrows** the ID
+of a regular episode (the Jellyfin plugin does this sometimes, so the special shows the regular
+episode's title). The test is whether that ID's Bangumi title matches the local special — if it
+does, the ID is a real OVA that Bangumi files under the main subject, so it stays; if not, the ID is
+cleared. An empty ID beats a wrong one, and the change goes into the backup file so `rollback`
+restores it exactly.
+
+```bash
+jbmid special --library Anime --clear-borrowed --out specials.json
+```
+
+### 5. `anchor` — repair the anchor of a single show
+
+The `Bangumi` value on the series (or a season) is the anchor every other mode starts from. A wrong
+anchor poisons the whole show — the usual symptom is one series stuck in `review` with
+`size mismatch` or `weak match`.
+
+```bash
+# Show what it has now and what the tool would pick (writes nothing)
+jbmid anchor --library Anime --series "The Melancholy of Haruhi Suzumiya" --dry-run
+
+# Let the tool decide: episode parents > season IDs > series ID > title search
+jbmid anchor --library Anime --series "The Melancholy of Haruhi Suzumiya"
+
+# You know the subject: give it explicitly (title-checked; --force overrides)
+jbmid anchor --library Anime --series "Some Show" --id 1606
+
+# The series-level ID is wrong and you don't want another one: drop it
+jbmid anchor --library Anime --series "Some Show" --clear
+```
+
+The order is not arbitrary: **each episode's own Bangumi ID belongs to exactly one subject**, so
+looking up the subject of the first couple of episodes in a season is more trustworthy than
+season-level metadata (frequently copied from a neighbouring entry). When a whole season's metadata
+failed to match, this is the fallback.
+
+### 6. `verify`: read-only health check
 
 ```bash
 jbmid verify --library Anime --out check.json
@@ -246,7 +283,7 @@ The offline run checks more, because order is more reliable than names:
 - `duplicate_series`: the same show is registered twice (e.g. `/hdd` and `/strm`)
 
 
-### 6. `protect` — stop a later refresh from overwriting your IDs
+### 7. `protect` — stop a later refresh from overwriting your IDs
 
 ```bash
 jbmid protect

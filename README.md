@@ -26,7 +26,7 @@
 Jellyfin 的每一集都有一个 `ProviderIds.Bangumi`，Bangumi 插件上报进度时只认这个数字。
 本工具负责把这个数字填对，**并且只填这一个字段**。
 
-五种模式，按你库的混乱程度选（下面「模式详解」有完整说明）：
+六个模式，按你库的混乱程度选（下面「模式详解」有完整说明）：
 
 | 模式 | 何时用 | 命令 |
 | --- | --- | --- |
@@ -35,6 +35,7 @@ Jellyfin 的每一集都有一个 `ProviderIds.Bangumi`，Bangumi 插件上报�
 | `auto` | 想一把梭，让工具自己按标题找条目、按集名对齐 | `jbmid auto` |
 | `special` | 番外 / SP / OVA / 总集篇 也想同步 | `jbmid special` → `jbmid apply` |
 | `verify` | 修完（或修前）想看看哪些 ID 是坏的，**只读不写** | `jbmid verify` |
+| `anchor` | 某一部剧的锚点（series/season 上的 Bangumi ID）本身就是错的 | `jbmid anchor --series "剧名"` |
 
 ## 安装
 
@@ -200,7 +201,38 @@ jbmid apply specials.json --backup specials-backup.json
 - 整条链上只有一两个 SP、且数量正好对上时，走顺序映射，但仍要求最低相似度 0.25。
 - 输出和 `scan` 完全同构，所以还是用 `apply` / `rollback`，备份照旧。
 
-### 5. `verify`：只读体检
+加 `--clear-borrowed` 还会处理另一种脏数据：番外「借用」了正片某一集 ID（Jellyfin 插件偶尔这么干，
+结果番外显示的是正片标题）。判定标准是**拿这个 ID 去 Bangumi 查，集名和本地番外对不上**——
+对得上说明它本来就是被 Bangumi 记成正片的 OVA，保留；对不上就清空，宁可空着也不挂错的。
+清空同样进备份，`rollback` 能一字不差地还原。
+
+```bash
+jbmid special --library 动漫 --clear-borrowed --out specials.json
+```
+
+### 5. `anchor`：只修一部剧的锚点
+
+剧集级 / 季级的 `Bangumi` 是「锚点」，所有模式都从它出发。锚点错了，整部剧再努力也匹配不上
+（典型症状：`review` 里一直挂着同一部剧，原因写着 `size mismatch` 或 `weak match`）。
+
+```bash
+# 看它现在挂的是什么、工具认为应该挂什么（不写）
+jbmid anchor --library 动漫 --series "凉宫春日的忧郁" --dry-run
+
+# 交给工具自己定：按季里第一集反查上级条目 > 季级 ID 多数票 > 剧集级 ID > 标题搜索
+jbmid anchor --library 动漫 --series "凉宫春日的忧郁"
+
+# 你确定是哪个条目，直接指定（会做一次标题校验，不像就拒绝，--force 可绕过）
+jbmid anchor --library 动漫 --series "某部剧" --id 1606
+
+# 剧集级 ID 是错的、又不想换一个新的，就清掉
+jbmid anchor --library 动漫 --series "某部剧" --clear
+```
+
+选 `--id` 的优先级不是拍脑袋：**每集自己的 Bangumi ID 只属于一个上级条目**，所以拿一季里头两集
+反查出来的条目，比季级元数据（经常是复制来的）可靠。整季元数据没匹配上时，这一条就是兜底。
+
+### 6. `verify`：只读体检
 
 ```bash
 jbmid verify --library 动漫 --out check.json
@@ -226,7 +258,7 @@ jbmid verify --library 动漫 --archive /path/to/bangumi/archive --out check.jso
 - `anchor_unused`：剧集级 Bangumi ID 没有任何一集在用——物语系列、凉宫的脏锚点就是这么查出来的
 - `duplicate_series`：同一部剧在库里登记了两份（例如 `/hdd` 与 `/strm` 各一套）
 
-### 6. `protect`：防止下次刷新把 ID 覆盖回去
+### 7. `protect`：防止下次刷新把 ID 覆盖回去
 
 ```bash
 jbmid protect
