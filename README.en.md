@@ -540,7 +540,7 @@ Two more shapes are recovered without a monotone chain:
 
 ```bash
 pip install -e .
-python -m unittest discover -s tests -v     # 66 tests, no network
+python -m unittest discover -s tests -v     # 71 tests, no network
 ```
 
 Tests cover title splitting, similarity, monotonic alignment, gap filling, scan decisions, special

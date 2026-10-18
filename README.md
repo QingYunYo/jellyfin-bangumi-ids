@@ -486,7 +486,7 @@ S01E05 - [Group] 白夜        ⟷  白夜            ✔ 1.00（先剥掉 [组�
 
 ```bash
 pip install -e .
-python -m unittest discover -s tests -v     # 66 个用例，不联网
+python -m unittest discover -s tests -v     # 71 个用例，不联网
 ```
 
 测试覆盖集名切分、相似度、单调对齐、空档补齐、扫描判定、番外匹配、库名解析、写入与回滚，
