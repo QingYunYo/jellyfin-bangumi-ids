@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import difflib
 import re
+import unicodedata
 from typing import Any, Dict, List, Sequence, Tuple
 
 SPECIAL_RE = re.compile(
@@ -19,9 +20,29 @@ def is_special(name: str) -> bool:
     return bool(name and SPECIAL_RE.search(name))
 
 
+# Full-width ``８６``/``！`` must fold to ASCII, and kana (``ダンダダン``) must survive:
+# stripping them left a lot of Japanese titles as an empty string -> similarity 0.
+_KEEP_RE = re.compile(r"[^0-9a-z\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff]")
+
+
 def normalize(text: str) -> str:
-    """Keep letters/digits/CJK only, casefolded. Punctuation differs between sources."""
-    return re.sub(r"[^0-9a-z\u4e00-\u9fff]", "", (text or "").casefold())
+    """NFKC + casefold, then keep letters/digits/kana/CJK. Punctuation differs between sources."""
+    folded = unicodedata.normalize("NFKC", text or "").casefold()
+    return _KEEP_RE.sub("", folded)
+
+
+def title_keys(series: Dict[str, Any]) -> List[str]:
+    """Every title a library may store for one show: localized name and original title."""
+    out: List[str] = []
+    for key in ("Name", "OriginalTitle"):
+        value = (series.get(key) or "").strip()
+        if value and normalize(value) and value not in out:
+            out.append(value)
+    if not out:
+        fallback = (series.get("Name") or "").strip()
+        if fallback:
+            out.append(fallback)
+    return out
 
 
 def similarity(a: str, b: str) -> float:

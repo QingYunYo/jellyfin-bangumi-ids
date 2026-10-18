@@ -102,9 +102,22 @@ jbmid scan --library Anime --no-search        # trust existing IDs only, never s
 ```
 
 Anchor priority: **the series' own Bangumi ID → any season's Bangumi ID → search by title.**
-A searched anchor must pass the title guard (`无职转生` matches
-`无职转生～到了异世界就拿出真本事～`; `Andor` does not match `安德烈和威利的冒险`), otherwise the
-show goes straight to `review` — no guessing.
+
+Two guards, both required:
+
+- **Stored IDs are verified too.** A library may carry a wrong id (the whole show pointing at an
+  unrelated title). The id is kept only if that subject's title resembles yours; otherwise it is
+  dropped and search takes over. Without this check one bad id keeps a show in `review` forever,
+  and a metadata refresh can rewrite the entire series.
+- **Search results must pass the title guard** (`无职转生` matches
+  `无职转生～到了异世界就拿出真本事～`; `Andor` does not match `安德烈和威利的冒险`), otherwise the
+  show goes straight to `review` — no guessing.
+
+Search queries **both `Name` and `OriginalTitle`**: a localized library name often differs from
+Bangumi's original title, and the original-title field usually hits it exactly (measured on 88
+shows: 81 hit by `Name` alone, 87 with `OriginalTitle` added). Text is NFKC-folded
+(`８６` → `86`) and kana is preserved — otherwise a pure-katakana title normalises to an empty
+string and scores 0 against everything.
 
 ### 2. `season` — you say which subjects form a season
 

@@ -72,7 +72,7 @@ class Jellyfin:
         start = 0
         while True:
             params = {
-                "IncludeItemTypes": "Series", "Recursive": "true", "Fields": "ProviderIds,Path",
+                "IncludeItemTypes": "Series", "Recursive": "true", "Fields": "ProviderIds,Path,OriginalTitle",
                 "Limit": 200, "StartIndex": start,
             }
             if parent:

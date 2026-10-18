@@ -5,7 +5,8 @@ import json
 import sys
 from typing import Any, Dict, List, Optional, Tuple
 
-from .match import align, episode_similarity, fill_gaps, is_special, name_match, similarity
+from .match import (align, episode_similarity, fill_gaps, is_special, name_match, similarity,
+                    title_keys)
 
 OK, REVIEW = "ok", "review"
 
@@ -30,27 +31,69 @@ def season_anchor(bgm, jf, series: Dict[str, Any]) -> Tuple[Optional[int], str]:
     return None, "none"
 
 
+def anchor_plausible(bgm, series: Dict[str, Any], sid: int) -> bool:
+    """An existing id is only an anchor if that subject really carries this show's title.
+
+    A wrong series-level id poisons everything downstream: the chain becomes one
+    unrelated show and the whole series can never recover.
+    """
+    if not title_keys(series):
+        return True
+    try:
+        subject = bgm.subject(int(sid))
+    except Exception:  # network hiccup: do not throw away a possibly good anchor
+        return True
+    names = [subject.get("name") or "", subject.get("name_cn") or ""]
+    return any(name_match(key, name) for key in title_keys(series) for name in names if name)
+
+
 def search_anchor(bgm, series: Dict[str, Any]) -> Tuple[Optional[int], str, List[str]]:
-    """Search bgm by title; refuse when the title does not really match."""
-    name = series.get("Name") or ""
+    """Search bgm by every stored title (localized + original); refuse weak matches."""
+    keys = title_keys(series)
     year = series.get("ProductionYear")
     notes: List[str] = []
-    try:
-        hits = bgm.search(name, 10)
-    except Exception as exc:  # network hiccup must not kill the whole scan
-        return None, "search-failed", [str(exc)]
-    best = None
-    for hit in hits:
-        cn = hit.get("name_cn") or ""
-        jp = hit.get("name") or ""
-        if name_match(name, cn) or name_match(name, jp):
-            best = hit
-            break
-        if year and str(hit.get("date") or "").startswith(str(year)):
-            notes.append("year-hit:%s" % (cn or jp))
-    if best:
-        return int(best["id"]), "search", notes
+    seen: List[int] = []
+    failed = 0
+    for key in keys:
+        try:
+            hits = bgm.search(key, 10)
+        except Exception as exc:  # network hiccup must not kill the whole scan
+            failed += 1
+            notes.append("%s: %s" % (key, exc))
+            continue
+        for hit in hits:
+            hid = hit.get("id")
+            if hid in seen:
+                continue
+            seen.append(hid)
+            cn = hit.get("name_cn") or ""
+            jp = hit.get("name") or ""
+            if any(name_match(k, t) for k in keys for t in (cn, jp) if t):
+                return int(hid), "search", notes
+            if year and str(hit.get("date") or "").startswith(str(year)):
+                notes.append("year-hit:%s" % (cn or jp))
+    if failed and failed == len(keys):
+        return None, "search-failed", notes
     return None, "search-mismatch", notes
+
+
+def pick_anchor(bgm, jf, series: Dict[str, Any], allow_search: bool = True
+                ) -> Tuple[Optional[int], str, List[str]]:
+    """Series id -> season id -> title search, discarding ids that do not describe this show."""
+    notes: List[str] = []
+    sid, how = series_anchor(series)
+    if sid and not anchor_plausible(bgm, series, sid):
+        notes.append("ignored implausible series id %s" % sid)
+        sid, how = None, "none"
+    if not sid:
+        sid, how = season_anchor(bgm, jf, series)
+        if sid and not anchor_plausible(bgm, series, sid):
+            notes.append("ignored implausible season id %s" % sid)
+            sid, how = None, "none"
+    if not sid and allow_search:
+        sid, how, extra = search_anchor(bgm, series)
+        notes.extend(extra)
+    return sid, how, notes
 
 
 def collect_local_episodes(jf, series: Dict[str, Any]) -> Tuple[List[Dict[str, Any]], int]:
@@ -120,12 +163,8 @@ def scan_series(jf, bgm, series: Dict[str, Any], allow_search: bool = True,
         "chain": [], "episodes": [], "to_write": 0, "coverage": 0.0, "mean_sim": 0.0,
         "skipped_specials": 0, "notes": [],
     }
-    sid, how = series_anchor(series)
-    if not sid:
-        sid, how = season_anchor(bgm, jf, series)
-    if not sid and allow_search:
-        sid, how, notes = search_anchor(bgm, series)
-        entry["notes"].extend(notes)
+    sid, how, notes = pick_anchor(bgm, jf, series, allow_search=allow_search)
+    entry["notes"].extend(notes)
     if not sid:
         entry["reason"] = "no Bangumi anchor (set one on the series or a season, or check the title)"
         return entry
@@ -213,11 +252,8 @@ def scan_specials(jf, bgm, series: Dict[str, Any], min_sim: float = 0.55) -> Dic
     name = series.get("Name") or ""
     entry: Dict[str, Any] = {"series": name, "series_id": series["Id"], "status": "review",
                              "reason": "", "episodes": [], "to_write": 0, "chain": []}
-    anchor, how = series_anchor(series)
-    if not anchor:
-        anchor, how = season_anchor(bgm, jf, series)
-    if not anchor:
-        anchor, how, _notes = search_anchor(bgm, series)
+    anchor, how, notes = pick_anchor(bgm, jf, series)
+    entry["notes"] = notes
     if not anchor:
         entry["reason"] = "no Bangumi anchor"
         return entry

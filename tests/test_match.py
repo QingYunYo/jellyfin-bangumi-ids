@@ -1,7 +1,7 @@
 import unittest
 
 from jellyfin_bangumi_ids.match import (align, episode_similarity, fill_gaps, is_special,
-                                        name_match, similarity, variants)
+                                        name_match, normalize, similarity, variants)
 
 
 def ep(name_cn, ep_id=1):
@@ -44,3 +44,19 @@ class MatchTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class NormalizeTest(unittest.TestCase):
+    def test_kana_survives(self):
+        # pure-katakana titles used to normalise to "" and score 0 against everything
+        self.assertEqual(normalize("ダンダダン"), "ダンダダン")
+        self.assertEqual(similarity("ダンダダン", "ダンダダン"), 1.0)
+        self.assertGreater(similarity("よふかしのうた", "よふかしのうた"), 0.9)
+
+    def test_fullwidth_folds_to_ascii(self):
+        self.assertEqual(normalize("８６―エイティシックス―"), "86エイティシックス")
+        self.assertEqual(normalize("ＦＡＴＥ／ＺＥＲＯ"), "fatezero")
+
+    def test_latin_and_cjk_still_work(self):
+        self.assertEqual(normalize("86-不存在的战区-"), "86不存在的战区")
+        self.assertTrue(name_match("命运之夜 前传", "Fate/Zero") is False)

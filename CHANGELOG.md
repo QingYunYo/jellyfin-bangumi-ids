@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.2.0
+
+- 搜索锚点时同时使用 `Name` 与 `OriginalTitle`（实测 88 部库：81 → 87 部命中）。
+- 已有锚点也要验：subject 标题与本剧名不符时丢弃，退回标题搜索，并在报告里写明
+  `ignored implausible series id`（一个错 ID 不再让整部剧永远 review）。
+- 新增 `match.title_keys()` 与 `scan.pick_anchor()`，统一「剧 ID → 季 ID → 搜索」三级回退。
+- `match.normalize()` 保留假名并做 NFKC 折叠：纯片假名标题不再归一化成空串，
+  全角 `８６` 与半角 `86` 视为同一标题。
+- 新增 6 个用例（假名、全角、锚点校验、原标题救回），共 27 个。
+
 ## Unreleased
 
 - 文档：README 按「症状 → 安装使用 → 实现原理」重排，并新增英文版 `README.en.md`。
