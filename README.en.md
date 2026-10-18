@@ -170,12 +170,8 @@ report         : jbmid-report.json
 
 On the full library (89 shows) those last three lines are the verdict: `89 / 0 / 0` means
 everything matched and nothing needs writing. `review` rows need a human; `to write` is what
-`apply` would change.
-
-> `scan` first uses **existing** Bangumi IDs as anchors, follows the "sequel" relations to pull
-> the whole TV chain, then aligns every main episode title on that chain against your library.
-> That is why it handles "one show split into several subjects" for free — as long as the chain's
-> total episode count fits your library.
+`apply` would change. How the anchor and the whole TV chain are built:
+[7.1](#71-scan--find-anchors-automatically).
 
 The report looks like this (excerpt; full field list in 7.1):
 
@@ -208,8 +204,8 @@ The report looks like this (excerpt; full field list in 7.1):
 
 ### 5.2 Writing and rolling back
 
-`apply` writes every episode with `change: true`: GET the full item → change only
-`ProviderIds.Bangumi` → POST it back → GET again and compare. Every write goes into a backup:
+`apply` writes every episode with `change: true` (the single-field write and the read-back check
+are described in section 9). Every write goes into a backup:
 
 ```json
 [
@@ -266,8 +262,6 @@ missed.
 
 ## 7. Modes in detail
 
-Seven modes, each with a real run.
-
 ### 7.1 `scan` — find anchors automatically
 
 ```bash
@@ -298,13 +292,8 @@ on 88 shows: `Name` alone matched 81, adding `OriginalTitle` reached 87). Normal
 full-width to half-width (`８６` → `86`) and keeps kana; without that, a pure-katakana title
 normalises to an empty string and similarity is always 0.
 
-**Output on the full library:**
-
-```text
-series ok      : 89
-series review  : 0
-episodes       : 0 to write
-```
+**Output on the full library** (89 shows): `89 ok / 0 review / 0 to write`; the three numbers are
+explained in 5.1.
 
 **Fields of each show in the report** (excerpt):
 
@@ -477,10 +466,10 @@ $ jbmid anchor --library 动漫 --series "凉宫春日的忧郁" --dry-run
 already correct, nothing to write
 ```
 
-The `--id` priority is not arbitrary: **an episode's own Bangumi ID belongs to exactly one parent
-subject**, so looking up the subject from the first couple of episodes in a season is more
-reliable than season-level metadata (which is often copied around). When the whole season failed to
-match, this is the fallback.
+Where that order comes from: **an episode's own Bangumi ID belongs to exactly one parent subject**,
+so the subject looked up from the first couple of episodes in a season beats season-level metadata
+(which is often copied around), and it is the fallback when a whole season failed to match (the
+order itself is in 7.1).
 
 Changes go into `anchor-backup.json`, in the same shape as episode backups, so `rollback` restores
 them too.
@@ -496,8 +485,8 @@ the similarity threshold is listed — note that **this does not mean it is wron
 titles, pure translation differences and English-titled subjects all show up as false positives
 and need a human scan.
 
-**Running it against the offline archive (recommended)**: the Bangumi plugin's archive
-(`{config dir}/data/bangumi/archive/`) costs no API quota and covers 2000+ episodes in seconds:
+**Running it against the offline archive (recommended)**: seconds for the whole library and no
+API quota; where the archive lives and how the index is built is in section 6:
 
 ```bash
 jbmid verify --library 动漫 --archive /path/to/bangumi/archive --out check.json
@@ -569,8 +558,8 @@ In CLANNAD's second season, 20 episodes had IDs shifted two positions to the rig
 carried episode 3's ID). Titles still matched episode by episode, so `scan` marked the show `ok`,
 and those 20 rows were `change: true`; `apply` wrote them in one go.
 
-> Signature: normal similarity, equal counts, but the `old` column is offset as a whole. Doing this
-> by hand is 20 edits; here it is one `scan` plus one `apply`.
+> Signature: normal similarity, equal counts, but the `old` column is offset as a whole — 20 hand
+> edits otherwise.
 
 ### 8.2 Only half the season had IDs
 
@@ -585,8 +574,8 @@ contain 「物语」, so the title guard passed and the whole show was wrong. Th
 season-ID majority vote produced the right subject (`anchor_how: season-vote`), the bad ID was
 replaced, and the 17 seasons were then pinned with a `season` map.
 
-> This case is the direct reason `pick_anchor` orders evidence as episode parent > season vote >
-> series ID > search: a series-level ID is one field, and one wrong value breaks a whole show.
+> This is why `pick_anchor` orders evidence the way it does: a series-level ID is one field, and
+> one wrong value breaks a whole show.
 
 ### 8.4 Broadcast order is not episode order
 
@@ -673,34 +662,31 @@ IPv4).
 
 ### Q4. The same show appears twice in the library
 
-Usually `/strm/` and `/hdd/` copies, or a leading space in the title (`新 吊带袜天使`). `season`
-mode needs the exact name from your library; `auto` mode searches by fuzzy title and refuses to
-guess when names collide.
+Usually `/strm/` and `/hdd/` copies, or a leading space in the title (`新 吊带袜天使`). `season` mode
+needs the exact name from your library; `auto` searches by fuzzy title and refuses to guess when
+names collide.
 
 ### Q5. How are SP / OVA handled
 
 `scan` and `auto` exclude Season 0 and episodes whose titles contain
-`OVA|OAD|SP|总集篇|番外|特典|NCOP|NCED`, and count them in the report's `skipped_specials`. For
-"an SP inserted at episode 8.5", use `season` mode with `"sp": true`.
+`OVA|OAD|SP|总集篇|番外|特典|NCOP|NCED` from main-episode alignment and count them in the report's
+`skipped_specials`; `special` (7.4) covers bonus episodes, and "an SP inserted at episode 8.5" is a
+`season` mode job with `"sp": true`.
 
 ### Q6. TMDB says one season, Bangumi has two subjects
 
 If the two subjects are linked by a "sequel" relation, `scan` / `auto` **align seasons
-automatically**: each local season is placed on a run of subjects, then titles are compared per
-season (see 12.3). No map needed. Only when the tool cannot decide (titles do not match, no stored
-IDs) do you need `season` mode by hand.
+automatically**; no map needed (the mechanism is in 12.3). Only when the tool cannot decide
+(titles do not match, no stored IDs) do you need `season` mode by hand.
 
 ### Q7. My library uses English titles — can it still match
 
 Yes, but it depends on the episode-title language of that subject on Bangumi. Western works
 (`Rick and Morty`) have English episode titles there, so per-episode similarity works. Japanese
 animation has a Japanese `name` and a Chinese `name_cn`; an English show title matches neither.
-Then the tool relies on three signals: **episode titles** (high enough similarity) → **episode IDs
-already stored in the library** (which subject's pool they fall into) → **equal counts** (ordered
-mapping). Rick and Morty was fully matched by the first two: season 5 has only 9 episodes and none
-of the titles match, but the stored IDs are exactly the Bangumi set of 10 with one missing, so the
-tool placed the hole correctly. Only when none of the three signals exists does a show go to
-`review`.
+Then three signals are tried in order: **episode titles** (high enough similarity) → **episode IDs
+already stored in the library** → **equal counts** (ordered mapping); only when none of them
+exists does a show go to `review`. Rick and Morty was fully matched by the first two (see 8.6).
 
 ### Q8. Is `--library` case-sensitive
 
@@ -715,9 +701,9 @@ often as you like.
 
 ### Q10. Does the offline archive go stale
 
-Yes — the plugin refreshes it roughly every two weeks. The tool falls back to the online API for
-anything missing, so an old archive can be slow but never causes missed matches. To force a
-refresh, run the plugin's "update offline database" task.
+Yes — the plugin refreshes it roughly every two weeks. Anything missing falls back to the online
+API (section 6), so an old archive can be slow but never causes missed matches. To force a refresh,
+run the plugin's "update offline database" task.
 
 ### Q11. Does it support movies or films
 
@@ -725,9 +711,8 @@ No. It handles TV episodes (`type=0`) and SPs (`type=1`) on the TV chain; films 
 
 ### Q12. Will it change my existing metadata
 
-No. Writing touches only `ProviderIds.Bangumi`, then reads the item back and compares
-`Name / Overview / PremiereDate / Imdb / Tmdb / Tvdb`, reporting `collateral` if anything else
-moved.
+No — writing touches only `ProviderIds.Bangumi`; the read-back comparison and the `collateral`
+check are in section 9.
 
 ## 11. Where the data comes from
 
@@ -762,8 +747,8 @@ Bangumi
 Two common misunderstandings:
 
 - **It does not read TMDB / TVDB data.** Those are only where your metadata came from; the tool
-  sees the episode title that scraping left in Jellyfin. So "TMDB one season, Bangumi two
-  subjects" is solved at the **title** level without knowing your scraper.
+  sees the episode title that scraping left in Jellyfin — so "TMDB one season, Bangumi two
+  subjects" is solved at the **title** level, whichever scraper you use.
 - **`sort` is not necessarily an integer.** Bangumi episode numbers can be `8.5` or `16.5` (an SP
   inserted between main episodes); sorting is done as floats, never rounded.
 
@@ -772,17 +757,13 @@ Two common misunderstandings:
 ### 12.1 The five-stage pipeline
 
 ```text
-① anchor     series ID → a season's ID → title search
+① anchor     episode parent → season-ID vote → series ID → title search (order in 7.1)
 ② chain      from the anchor follow "sequel" forward and "prequel" backward, de-duplicated
 ③ pool       take type=0 from every subject on the chain, drop empty titles, sort by `sort`
 ④ align      segment → variant split → similarity → monotonic best match → gap fill
-⑤ decide     equal counts, or (similar size + coverage ≥ 90% + mean similarity ≥ 0.55)
-⑥ write      GET the full DTO → change one field → POST → GET back and compare
+⑤ decide     conditions in 12.4
+⑥ write      GET the full DTO → change one field → POST → GET back (see section 9)
 ```
-
-**① Anchor** is the cheapest and most reliable signal; only when there is none does the tool search
-by title, and search results must pass the title guard (mutual containment after normalisation),
-otherwise the show goes straight to `review`.
 
 ### 12.2 What alignment looks like
 
@@ -809,21 +790,19 @@ titles, each compared against `name_cn` / `name`.
   handles translation differences like `觉悟` ↔ `決心` that score 0 on similarity but are
   positionally certain.
 
-**Avoiding cross-season drift**: when the number of local seasons equals the number of subjects on
-the chain, each season is aligned only against **its own** subject. When they differ, a season-level
-alignment runs first (12.3); if it succeeds each season gets its own subjects, otherwise the whole
-chain is treated as one pool. A flat pool lets one short season shift every later season — the most
-common way tools like this break.
+**Avoiding cross-season drift**: when the local season count equals the subject count on the chain,
+each season is aligned only against **its own** subject; otherwise a season-level alignment runs
+first (12.3) and only if that fails is the chain treated as one pool. A flat pool lets one short
+season shift every later season — the most common way tools like this break.
 
 ### 12.3 Shapes that season alignment solves
 
 Each local season and each subject on the chain get a similarity matrix over **episode-title
-fingerprints**; an order-preserving DP then assigns runs of consecutive subjects to seasons. It
-allows several local seasons inside one subject, allows single-episode movies on the chain to be
-skipped outright, and allows a season to be merely a subset of a subject. Evidence must be real —
-positional guessing does not count: title coverage ≥ 90% and mean similarity ≥ 0.55, or every
-stored Bangumi episode ID falls inside that run and increases strictly. If any step fails, the whole
-assignment is abandoned and the flat pool takes over.
+fingerprints**; an order-preserving DP then assigns runs of consecutive subjects to seasons,
+allowing several local seasons inside one subject, single-episode movies to be skipped outright, and
+a season to be merely a subset. Evidence must be real — no positional guessing: title coverage
+≥ 90% and mean similarity ≥ 0.55, or every stored Bangumi episode ID inside that run and strictly
+increasing. If any step fails, the assignment is abandoned and the flat pool takes over.
 
 | Your library | Bangumi chain | Result |
 | --- | --- | --- |
@@ -854,15 +833,11 @@ condition fails, the show goes to `review` and nothing is changed.
 
 ## 13. Generality: will it work on someone else's library?
 
-**There is nothing "of one person's library" in the code**
-
-- No hard-coded subject IDs, show names or episode counts. The only fixed constant is the Bangumi
-  plugin GUID `41b59f1b-a6cf-474a-b416-785379cbd856`, which the plugin author sets and which is
-  used only by `protect` to flip `TrustExistedBangumiId`.
-- A library without any Bangumi IDs still works (title search). When there is no ID and no title
-  match, it reports `no Bangumi anchor` instead of guessing.
-
-**Defences against "someone else's library"**: see the table in 8.8.
+**There is nothing "of one person's library" in the code**: no hard-coded subject IDs, show names
+or episode counts; the only fixed constant is the Bangumi plugin GUID `41b59f1b-a6cf-474a-b416-785379cbd856`,
+used only by `protect` to flip `TrustExistedBangumiId`. A library without any Bangumi IDs still
+works (title search); with neither an ID nor a title match it reports `no Bangumi anchor` instead
+of guessing. Defences against "someone else's library" are in the table in 8.8.
 
 **Cross-version, cross-environment compatibility**
 
@@ -871,9 +846,7 @@ condition fails, the show goes to `review` and nothing is changed.
 - Episodes are fetched with `/Items?ParentId=` rather than `/Shows/{seasonId}/Episodes` (which
   returns 404 `Series not found` on some versions).
 - Network: 5xx / 429 / URLError retried three times with backoff; a single failing show is marked
-  `review` without aborting the run; `--ipv4` cures the "IPv6 advertised but broken, AAAA polluted"
-  20-second-per-show case.
-- Python ≥ 3.8, zero third-party dependencies, `jbmid` appears after `pip install`.
+  `review` without aborting the run. Runtime dependencies: section 3 (standard library only).
 
 **Safe and reversible**: see section 9.
 
@@ -884,11 +857,10 @@ condition fails, the show goes to `review` and nothing is changed.
 2. **Titles with no information** (bare "Episode 1") and counts that differ from Bangumi — `review`
    only.
 3. **Subjects that do not exist on Bangumi** — films, bonus shorts and in-show shows are not on the
-   TV chain, and the tool will not force them.
-4. **Films** are out of scope.
-5. **The Bangumi plugin must be installed**; `protect` depends on its fixed GUID.
-6. It does not scrape and does not rename episodes; when Bangumi's `sort` is not a consecutive
-   integer (e.g. 8.5) it sorts as a float without rounding.
+   TV chain, and movies are out of scope; the tool will not force them.
+4. **The Bangumi plugin must be installed**; `protect` depends on its fixed GUID.
+5. It does not scrape and does not rename episodes; non-integer `sort` values are handled in
+   section 11.
 
 ## 15. Development
 
