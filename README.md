@@ -384,8 +384,8 @@ python -m unittest discover -s tests -v     # 21 个用例，不联网
 # 2) 跑测试
 python -m unittest discover -s tests
 # 3) 提交并打 tag
-git commit -am "chore: release v1.1.0"
-git tag -a v1.1.0 -m "v1.1.0"
+git commit -am "chore: release v0.1.2"
+git tag -a v0.1.2 -m "v0.1.2"
 git push origin main --tags
 # 4) 在 GitHub 的 Releases 页面用 tag 建一个 release（可附 wheel）
 python -m pip wheel . --no-deps -w dist

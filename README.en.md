@@ -420,8 +420,8 @@ matching, library resolution, writing and rollback.
 # 2) run the tests
 python -m unittest discover -s tests
 # 3) commit and tag
-git commit -am "chore: release v1.1.0"
-git tag -a v1.1.0 -m "v1.1.0"
+git commit -am "chore: release v0.1.2"
+git tag -a v0.1.2 -m "v0.1.2"
 git push origin main --tags
 # 4) create a release from the tag on GitHub (attach the wheel)
 python -m pip wheel . --no-deps -w dist

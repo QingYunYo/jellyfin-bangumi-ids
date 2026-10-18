@@ -183,3 +183,31 @@ class SpecialsTest(unittest.TestCase):
         entry = scan_specials(jf, bgm, self._series())
         self.assertEqual(entry["status"], REVIEW)
         self.assertEqual(entry["to_write"], 0)
+
+
+class ChainTrimTest(unittest.TestCase):
+    """One franchise, several subjects: align against the part this library actually holds."""
+
+    def _episodes(self, base, count):
+        return [{"id": base + i, "sort": i + 1, "name_cn": "第%d话" % (i + 1)} for i in range(count)]
+
+    def test_sequel_subject_is_trimmed_when_counts_match(self):
+        show = {"Id": "s1", "Name": "T", "OriginalTitle": "T", "ProviderIds": {"Bangumi": "100"}}
+        bgm = FakeBgm({100: self._episodes(1000, 13), 200: self._episodes(2000, 13)},
+                      names={100: "T", 200: "T 续作"})
+        bgm.links = {100: [200], 200: []}
+        jf = FakeJf(show, [(1, [("e%d" % i, "第%d话" % i) for i in range(1, 14)])])
+        entry = scan_series(jf, bgm, jf.series)
+        self.assertEqual(entry["chain"], [100])
+        self.assertEqual(entry["status"], OK)
+        self.assertTrue(any("chain trimmed" in n for n in entry["notes"]))
+
+    def test_prequel_is_not_used_to_match_a_shorter_library(self):
+        show = {"Id": "s2", "Name": "T", "OriginalTitle": "T", "ProviderIds": {"Bangumi": "200"}}
+        bgm = FakeBgm({100: self._episodes(1000, 25), 200: self._episodes(2000, 13)},
+                      names={100: "T 前传", 200: "T"})
+        bgm.chain = lambda sid: [100, 200]   # prequel first, anchor second
+        jf = FakeJf(show, [(1, [("e%d" % i, "第%d话" % i) for i in range(1, 26)])])
+        entry = scan_series(jf, bgm, jf.series)
+        self.assertEqual(entry["chain"], [100, 200])
+        self.assertEqual(entry["status"], REVIEW)

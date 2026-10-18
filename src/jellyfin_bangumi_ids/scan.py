@@ -119,6 +119,34 @@ def build_pool(bgm, chain: List[int]) -> List[Dict[str, Any]]:
     return pool
 
 
+def _fit_chain(bgm, chain: List[int], anchor: int, local_total: int) -> List[int]:
+    """Trim the chain to the exact window around the anchor that matches the local count.
+
+    A franchise is split across several subjects; when the library holds only one of
+    them (the sequel lives as a separate series), aligning against the whole chain
+    doubles the pool and everything ends in ``review``. Only exact count matches win,
+    and prequels are tried last, so ``Fate/Zero`` cannot swallow ``Unlimited Blade Works``.
+    """
+    if local_total <= 0 or anchor not in chain or len(chain) < 2:
+        return chain
+    start = chain.index(anchor)
+    total = 0
+    for end in range(start, len(chain)):
+        total += len(bgm.episode_list(chain[end]))
+        if total == local_total:
+            return chain[start:end + 1]
+        if total > local_total:
+            break
+    total = 0
+    for begin in range(start, -1, -1):
+        total += len(bgm.episode_list(chain[begin]))
+        if total == local_total:
+            return chain[begin:start + 1]
+        if total > local_total:
+            break
+    return chain
+
+
 def _segments(jf, bgm, series: Dict[str, Any], chain: List[int]
               ) -> Tuple[List[Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]], int]:
     """Split local episodes into the groups we align against one pool at a time.
@@ -171,6 +199,16 @@ def scan_series(jf, bgm, series: Dict[str, Any], allow_search: bool = True,
 
     entry["anchor"], entry["anchor_how"] = sid, how
     chain = bgm.chain(sid)
+    local_total = 0
+    for season in jf.seasons(series["Id"]):
+        if (season.get("IndexNumber") or 0) < 1:
+            continue
+        local_total += len([e for e in jf.season_episodes(season["Id"])
+                            if not is_special(e.get("Name") or "")])
+    fitted = _fit_chain(bgm, chain, sid, local_total)
+    if len(fitted) != len(chain):
+        entry["notes"].append("chain trimmed to %d subject(s)" % len(fitted))
+    chain = fitted
     entry["chain"] = chain
     segments, skipped = _segments(jf, bgm, series, chain)
     entry["skipped_specials"] = skipped
