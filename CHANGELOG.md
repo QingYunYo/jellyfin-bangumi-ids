@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- 文档：README 按「症状 → 安装使用 → 实现原理」重排，并新增英文版 `README.en.md`。
+
 ## 1.1.0
 
 - 新增 `special` 子命令：把番外 / SP / OVA / 总集篇 也对上 Bangumi 的 `type=1` 集
