@@ -2,6 +2,8 @@
 
 **批量修好 Jellyfin 里 Bangumi 插件的剧集 ID。**
 
+![tests](https://github.com/QingYunYo/jellyfin-bangumi-ids/actions/workflows/test.yml/badge.svg)
+
 > 中文 | [English](README.en.md)
 
 零依赖的命令行工具，修的是 Jellyfin 剧集的 `ProviderIds.Bangumi`。这个 ID 错了，Bangumi 插件要么
@@ -357,14 +359,13 @@ S01E05 - [Group] 白夜        ⟷  白夜            ✔ 1.00（先剥掉 [组�
 
 ```bash
 pip install -e .
-python -m unittest discover -s tests -v     # 16 个用例，不联网
+python -m unittest discover -s tests -v     # 21 个用例，不联网
 ```
 
-测试覆盖集名切分、相似度、单调对齐、空档补齐、扫描判定、番外匹配、写入与回滚。
+测试覆盖集名切分、相似度、单调对齐、空档补齐、扫描判定、番外匹配、库名解析、写入与回滚。
 
-> **CI 默认关闭。** GitHub 只允许带 `workflow` scope 的 token 推送 `.github/workflows/`，
-> 所以工作流模板放在 `docs/ci/test.yml`。想启用：在仓库网页新建文件
-> `.github/workflows/test.yml`，把模板内容贴进去即可（网页操作不需要 token）。
+> CI 在每次 push / PR 时自动跑，Python 3.8 / 3.10 / 3.12 三套矩阵，
+> 工作流见 `.github/workflows/test.yml`。
 
 ### 发布新版本
 

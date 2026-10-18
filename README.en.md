@@ -2,6 +2,8 @@
 
 **Fix the Bangumi episode IDs in your Jellyfin library, in bulk.**
 
+![tests](https://github.com/QingYunYo/jellyfin-bangumi-ids/actions/workflows/test.yml/badge.svg)
+
 > [中文](README.md) | English
 
 A zero-dependency CLI that repairs `ProviderIds.Bangumi` on Jellyfin episodes. When that ID is
@@ -389,15 +391,14 @@ tools like this break.
 
 ```bash
 pip install -e .
-python -m unittest discover -s tests -v     # 16 tests, no network
+python -m unittest discover -s tests -v     # 21 tests, no network
 ```
 
 Tests cover title splitting, similarity, monotonic alignment, gap filling, scan decisions, special
-matching, writing and rollback.
+matching, library resolution, writing and rollback.
 
-> **CI is off by default.** GitHub only allows pushing `.github/workflows/` with a token that has
-> the `workflow` scope, so the template lives at `docs/ci/test.yml`. To enable it, create
-> `.github/workflows/test.yml` in the web UI and paste the template in (no token needed for that).
+> CI runs on every push / PR across Python 3.8 / 3.10 / 3.12;
+> the workflow lives at `.github/workflows/test.yml`.
 
 ### Releasing
 

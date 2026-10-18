@@ -3,6 +3,9 @@
 ## Unreleased
 
 - 文档：README 按「症状 → 安装使用 → 实现原理」重排，并新增英文版 `README.en.md`。
+- `--library` 解析改为精确 → 忽略大小写 → 唯一子串，失败时列出可用库名。
+- `special` 模式的 `reason` 文案统一为英文；新增 5 个库名解析用例（共 21 个）。
+- 启用 GitHub Actions：push / PR 跑 3.8 / 3.10 / 3.12 矩阵。
 
 ## 1.1.0
 
