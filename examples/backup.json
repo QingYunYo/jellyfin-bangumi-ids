@@ -1,0 +1,29 @@
+[
+ {
+  "item_id": "e983c2466b9568646ca4f23cfb208e79",
+  "series": "CLANNAD",
+  "season": 2,
+  "index": 1,
+  "name": "向结束的夏天说再见",
+  "old": "647",
+  "new": "645"
+ },
+ {
+  "item_id": "66685993b3232300154df6e91fb72900",
+  "series": "CLANNAD",
+  "season": 2,
+  "index": 2,
+  "name": "寻找虚假的爱情",
+  "old": "648",
+  "new": "646"
+ },
+ {
+  "item_id": "ea65ccc0ba29c267b4308c5da6202bea",
+  "series": "正相反的你与我",
+  "season": 1,
+  "index": 13,
+  "name": "平安夜",
+  "old": null,
+  "new": "1704756"
+ }
+]

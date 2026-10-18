@@ -16,6 +16,9 @@
   「模式详解」的七个模式各自展开为 7.1–7.7，每个模式都附真实输入与终端输出，并在合适位置给出
   报告 / 备份 / season map 的 JSON 实例；新增第 8 章「实战：我在自己的动漫库上遇到的错位」
   （8 类真实案例）与 12.1–12.4 子节；FAQ 全部编号（Q1–Q12）。英文版同步同一结构。
+- `examples/` 收成一组真实输出节选：`scan-report.json`（含 ok / weak match / size mismatch）、
+  `backup.json`、`special-report.json`、`verify-report.json`，加上原有的 17 季 season map，
+  并新增 `examples/README.md` 索引；两篇 README 在对应小节链接到这些文件。
 
 ## 0.1.2
 

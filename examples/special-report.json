@@ -1,0 +1,57 @@
+{
+ "library": "动漫",
+ "mode": "special",
+ "series": [
+  {
+   "series": "CLANNAD",
+   "series_id": "317488b2c4f8ce6eab5944f42d891eee",
+   "status": "ok",
+   "reason": "",
+   "episodes": [
+    {
+     "season": 0,
+     "index": 1,
+     "name": "暑假的故事",
+     "old": "37338",
+     "bgm_id": "37338",
+     "bgm_name": "暑假的故事",
+     "sim": 1.0,
+     "change": false,
+     "item_id": "77658c599d9b78269e22c93a272686f1"
+    },
+    {
+     "season": 0,
+     "index": 3,
+     "name": "一年前的事",
+     "old": "7542",
+     "bgm_id": "7542",
+     "bgm_name": "一年前的事",
+     "sim": 1.0,
+     "change": false,
+     "item_id": "3ec6da860f27109f2fe87de989c2d00b"
+    }
+   ],
+   "to_write": 0,
+   "chain": [
+    51,
+    876
+   ],
+   "notes": [],
+   "anchor": 51,
+   "anchor_how": "episode-parent",
+   "pool": 3,
+   "local": 5,
+   "matched": 3,
+   "mean_sim": 0.92,
+   "coverage": 0.6,
+   "borrowed_cleared": 0
+  }
+ ],
+ "summary": {
+  "series_ok": 13,
+  "series_review": 76,
+  "episodes_to_write": 0,
+  "specials_matched": 19,
+  "specials_cleared": 0
+ }
+}

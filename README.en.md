@@ -203,6 +203,9 @@ The report looks like this (excerpt; full field list in 7.1):
 }
 ```
 
+> The full sample is an excerpt of a real report (one `ok` row and two `review` rows with
+> their original `reason`): [`examples/scan-report.json`](examples/scan-report.json).
+
 ### 5.2 Writing and rolling back
 
 `apply` writes every episode with `change: true`: GET the full item → change only
@@ -214,6 +217,9 @@ The report looks like this (excerpt; full field list in 7.1):
   "season": 1, "index": 2, "name": "…", "old": "1336023", "new": "1336024"}
 ]
 ```
+
+> Full sample: [`examples/backup.json`](examples/backup.json) (a whole-column shift and a
+> previously empty ID).
 
 Rolling back means writing `old` back, with one command:
 
@@ -340,7 +346,8 @@ a json file:
 - When the pool size equals your episode count the IDs are written in order; otherwise the tool
   aligns by title, and if coverage is below 100% the season goes to `review`.
 
-A real map is in [`examples/monogatari-season-map.json`](examples/monogatari-season-map.json).
+A real map is in [`examples/monogatari-season-map.json`](examples/monogatari-season-map.json);
+all sample files are indexed in [`examples/README.md`](examples/README.md).
 
 **Output** (that 17-season map against 物语系列):
 
@@ -426,6 +433,9 @@ episodes       : 0 to write
 Very few SP sets are already correct (Bangumi sometimes records an OVA as a main episode), so
 only 13 of 89 shows have alignable specials.
 
+Report excerpt (`match 3/5`, per-episode `old` / `bgm_id`):
+[`examples/special-report.json`](examples/special-report.json).
+
 With `--clear-borrowed` it also handles another kind of dirt: a special "borrows" a main
 episode's ID (Jellyfin's plugin occasionally does this, and the special then displays the main
 episode's title). The test is **fetch that ID from Bangumi and compare the title with the local
@@ -493,6 +503,8 @@ and need a human scan.
 jbmid verify --library 动漫 --archive /path/to/bangumi/archive --out check.json
 ```
 
+Report excerpt: [`examples/verify-report.json`](examples/verify-report.json).
+
 **Output:**
 
 ```text
@@ -507,7 +519,7 @@ Besides those six counters, `check.json` lists the details per category:
 {
   "checked": 2095, "threshold": 0.45,
   "unknown": 0, "duplicate": 3, "low_similarity": 278,
-  "disorder": 22, "foreign_subject": 5, "anchor_rows": 0,
+  "disorder": 22, "foreign_subject": 5, "anchor_rows": [],
   "duplicate_series": [
     {"name": "间谍过家家",
      "paths": ["/strm/Anime/…/间谍过家家 (2022)", "/hdd/Anime/间谍过家家 (2022)"]}
@@ -528,7 +540,7 @@ The offline check sees more than the online one, because order is more reliable 
 | `duplicate` | one bgm episode ID is shared by two episodes (usually a Season 0 special borrowing a main ID) |
 | `disorder` | within one season, the bgm `sort` values behind the IDs are not `n, n+1, n+2…` (shifted or crossed) |
 | `foreign_subject` | this episode belongs to another bgm subject, and it is the only one (orphan ID) |
-| `anchor_rows` (the `anchors N` line) | series-level IDs that either do not exist (`unknown`) or are not used by any episode (`unused`), summed |
+| `anchor_rows` (the `anchors N` line) | the report stores detail rows; the terminal number N is the sum of "does not exist" (`unknown`) and "no episode uses it" (`unused`) |
 | `duplicate_series` | the same show is registered twice (e.g. under both `/hdd` and `/strm`) |
 
 The dirty anchors of 物语系列 and 凉宫 were found exactly this way, through `anchor_rows`.
@@ -912,7 +924,7 @@ src/jellyfin_bangumi_ids/
   verify.py        read-only health check
   transport.py     retries and IPv4
 tests/             71 tests, offline
-examples/          a season map you can adapt
+examples/          real output samples: report / backup / verify / specials / season map
 ```
 
 ### 15.3 Releasing

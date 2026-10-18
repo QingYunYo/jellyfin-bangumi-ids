@@ -1,0 +1,49 @@
+{
+ "checked": 2095,
+ "threshold": 0.45,
+ "unknown": 0,
+ "duplicate": 3,
+ "low_similarity": 278,
+ "disorder": 22,
+ "foreign_subject": 5,
+ "anchor_rows": [],
+ "duplicate_series": [
+  {
+   "name": "间谍过家家",
+   "ids": [
+    "89518eb8f04a099829438dfa854fe1b2",
+    "a6ee38ab870fb5c308952f086a91148e"
+   ],
+   "paths": [
+    "/strm/Anime/115动漫/间谍过家家 (2022)",
+    "/hdd/Anime/间谍过家家 (2022)"
+   ]
+  }
+ ],
+ "rows": [
+  {
+   "series": "2.5次元的诱惑",
+   "item_id": "f3721406fd4c6dfb005f7a41f6994af5",
+   "bgm_id": 1336030,
+   "local": "热爱Cosplay吗？",
+   "season": 1,
+   "index": 8,
+   "bgm": "爱着角色扮演吗？",
+   "subject": 410346,
+   "sim": 0.235,
+   "kind": "low_similarity"
+  },
+  {
+   "series": "2.5次元的诱惑",
+   "item_id": "b26e461ef2192782398fe9c6266ecfb9",
+   "bgm_id": 1336045,
+   "local": "沙滩上的漫研",
+   "season": 1,
+   "index": 23,
+   "bgm": "漫研 on the beach",
+   "subject": 410346,
+   "sim": 0.222,
+   "kind": "low_similarity"
+  }
+ ]
+}

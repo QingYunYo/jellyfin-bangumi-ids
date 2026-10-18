@@ -194,6 +194,9 @@ report         : jbmid-report.json
 }
 ```
 
+> 完整示例是真实报告的节选（一条 `ok`、两条 `review` 的原文 `reason`）：
+> [`examples/scan-report.json`](examples/scan-report.json)。
+
 ### 5.2 写入与回滚
 
 `apply` 会把报告里 `change: true` 的集逐条写入：GET 完整条目 → 只改 `ProviderIds.Bangumi`
@@ -205,6 +208,8 @@ report         : jbmid-report.json
   "season": 1, "index": 2, "name": "…", "old": "1336023", "new": "1336024"}
 ]
 ```
+
+> 完整示例：[`examples/backup.json`](examples/backup.json)（整列右移与原本为空的都在）。
 
 回滚就是照着 `old` 写回去，一条命令：
 
@@ -318,7 +323,7 @@ episodes       : 0 to write
   `sp: true` 表示把该条目的 SP 也纳入池子（处理「SP 插在正片中间」的情况）。
 - 池子和本地集数相等时按顺序写；不等时按集名对齐，命中率不到 100% 就 `review`。
 
-真实例子见 [`examples/monogatari-season-map.json`](examples/monogatari-season-map.json)。
+真实例子见 [`examples/monogatari-season-map.json`](examples/monogatari-season-map.json)，其余示例文件见 [`examples/README.md`](examples/README.md)。
 
 **输出**（用上面那份 17 季的 map 跑「物语系列」）：
 
@@ -397,6 +402,8 @@ episodes       : 0 to write
 
 极少数 SP 本来就已经对（比如 Bangumi 把 OVA 记成正片），所以 89 部里只有 13 部有可对齐的番外。
 
+报告节选（`match 3/5`、逐集 `old` / `bgm_id`）：[`examples/special-report.json`](examples/special-report.json)。
+
 加 `--clear-borrowed` 还会处理另一种脏数据：番外「借用」了正片某一集 ID（Jellyfin 插件偶尔这么干，
 结果番外显示的是正片标题）。判定标准是**拿这个 ID 去 Bangumi 查，集名和本地番外对不上**——
 对得上说明它本来就是被 Bangumi 记成正片的 OVA，保留；对不上就清空，宁可空着也不挂错的。
@@ -457,6 +464,8 @@ jbmid verify --library 动漫 --out check.json
 jbmid verify --library 动漫 --archive /path/to/bangumi/archive --out check.json
 ```
 
+报告节选：[`examples/verify-report.json`](examples/verify-report.json)。
+
 **输出**：
 
 ```text
@@ -471,7 +480,7 @@ offline check: 2095 ids | unknown 0 | dup 3 | low-sim 278 | disorder 22 | foreig
 {
   "checked": 2095, "threshold": 0.45,
   "unknown": 0, "duplicate": 3, "low_similarity": 278,
-  "disorder": 22, "foreign_subject": 5, "anchor_rows": 0,
+  "disorder": 22, "foreign_subject": 5, "anchor_rows": [],
   "duplicate_series": [
     {"name": "间谍过家家",
      "paths": ["/strm/Anime/…/间谍过家家 (2022)", "/hdd/Anime/间谍过家家 (2022)"]}
@@ -492,7 +501,7 @@ offline check: 2095 ids | unknown 0 | dup 3 | low-sim 278 | disorder 22 | foreig
 | `duplicate` | 同一个 bgm 集 ID 被两集共用（多半是 Season 0 特别篇借了正片的 ID） |
 | `disorder` | 同一季里 ID 对应的 bgm `sort` 不是 `n, n+1, n+2…` 连续递增（错位/串条） |
 | `foreign_subject` | 这一集属于另一个 bgm 条目，且只有它一个（孤儿 ID） |
-| `anchor_rows`（终端 `anchors N`） | 剧集级 ID 既查不到（`unknown`）又没有任何一集在用它（`unused`），两项合计 |
+| `anchor_rows`（终端 `anchors N`） | 报告里是明细行；终端那个 N 是「查不到」（`unknown`）与「没有任何一集在用」（`unused`）的合计 |
 | `duplicate_series` | 同一部剧在库里登记了两份（例如 `/hdd` 与 `/strm` 各一套） |
 
 物语系列、凉宫的脏锚点就是 `anchor_rows` 查出来的。
@@ -834,7 +843,7 @@ src/jellyfin_bangumi_ids/
   verify.py        只读体检
   transport.py     重试与 IPv4
 tests/             71 个用例，不联网
-examples/          可直接改用的 season map
+examples/          真实输出节选：报告 / 备份 / 体检 / 番外 / season map
 ```
 
 ### 15.3 发布新版本

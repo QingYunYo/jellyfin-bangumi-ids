@@ -1,0 +1,115 @@
+{
+ "library": "动漫",
+ "threshold": 0.45,
+ "series": [
+  {
+   "series": "2.5次元的诱惑",
+   "series_id": "de823914fb4ec64beb3238ee0be7262c",
+   "seasons": 1,
+   "status": "ok",
+   "reason": "",
+   "anchor": 410346,
+   "anchor_how": "series-id",
+   "chain": [
+    410346
+   ],
+   "episodes": [
+    {
+     "item_id": "69c36749e0dfb987a371a1980815c354",
+     "season": 1,
+     "index": 1,
+     "name": "异次元的新进生",
+     "bgm_id": "1336023",
+     "bgm_name": "来自异次元的新生",
+     "old": "1336023",
+     "change": false,
+     "sim": 0.8
+    },
+    {
+     "item_id": "4fbed98091500bc79085c3e5cc6144dc",
+     "season": 1,
+     "index": 2,
+     "name": "共同出角的预感",
+     "bgm_id": "1336024",
+     "bgm_name": "共同出角的预感",
+     "old": "1336024",
+     "change": false,
+     "sim": 1.0
+    }
+   ],
+   "to_write": 0,
+   "coverage": 1.0,
+   "mean_sim": 0.902859477124183,
+   "skipped_specials": 0,
+   "notes": [
+    "chain trimmed to 1 subject(s)"
+   ]
+  },
+  {
+   "series": "命运之夜 无限剑制",
+   "series_id": "a293c7535a3f93513299e770f4ad27f6",
+   "seasons": 2,
+   "status": "review",
+   "reason": "size mismatch 25 local vs 51 pool",
+   "anchor": 95225,
+   "anchor_how": "series-id",
+   "chain": [
+    10639,
+    95225,
+    109386
+   ],
+   "episodes": [
+    {
+     "item_id": "75db301f682370863005db3279947091",
+     "season": 1,
+     "index": 1,
+     "name": "冬之日，命运之夜",
+     "bgm_id": "435522",
+     "bgm_name": "冬日，命运之夜",
+     "old": "435522",
+     "change": false,
+     "sim": 0.923
+    },
+    {
+     "item_id": "6c303690a9c5843c15dd27db09c3f343",
+     "season": 1,
+     "index": 2,
+     "name": "开幕之时",
+     "bgm_id": "436160",
+     "bgm_name": "开幕之时",
+     "old": "436160",
+     "change": false,
+     "sim": 1.0
+    }
+   ],
+   "to_write": 0,
+   "coverage": 1.0,
+   "mean_sim": 0.9462093462093462,
+   "skipped_specials": 0,
+   "notes": []
+  },
+  {
+   "series": "凉宫春日的忧郁",
+   "series_id": "66cd9aade8589fc19b81d5776ffeccd6",
+   "seasons": 1,
+   "status": "review",
+   "reason": "weak match: coverage 0%, mean sim 0.00",
+   "anchor": 1372,
+   "anchor_how": "series-id",
+   "chain": [
+    1372
+   ],
+   "episodes": [],
+   "to_write": 0,
+   "coverage": 0.0,
+   "mean_sim": 0.0,
+   "skipped_specials": 0,
+   "notes": []
+  }
+ ],
+ "summary": {
+  "series_ok": 82,
+  "series_review": 7,
+  "episodes_to_write": 0
+ }
+}
