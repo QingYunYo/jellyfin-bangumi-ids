@@ -146,3 +146,14 @@ def name_match(left: str, right: str) -> bool:
     """Loose title guard: one title must contain the other after normalisation."""
     a, b = normalize(left), normalize(right)
     return bool(a and b and (a in b or b in a))
+
+
+_PREFIX = re.compile(r"^\s*[Ss]\d{1,2}[Ee]\d{1,4}\s*[-–—:]+\s*")
+_BRACKET = re.compile(r"[\[【(（][^\]】)）]{0,40}[\]】)）]")
+
+
+def clean_title(name: str) -> str:
+    """Drop release-group noise that leaks in from file names ("S01E01 - [Group] ...")."""
+    text = _PREFIX.sub("", name or "")
+    text = _BRACKET.sub(" ", text)
+    return " ".join(text.split())

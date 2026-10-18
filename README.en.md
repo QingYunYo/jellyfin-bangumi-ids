@@ -183,16 +183,33 @@ episode whose title contains `OVA|SP|番外|总集篇`.
   positional mapping, but still requires a floor of 0.25 similarity.
 - The output is structurally identical to `scan`, so `apply` / `rollback` work unchanged.
 
-### 5. `verify` — read-only health check
+### 5. `verify`: read-only health check
 
 ```bash
 jbmid verify --library Anime --out check.json
 ```
 
-Looks every episode with a Bangumi ID up against `api.bgm.tv` and compares titles. Everything
-below the threshold is listed — note that **a low score is not proof of a wrong ID**: filename-style
-titles, pure translation differences and English-titled subjects all produce false positives, so
-give the list a human pass.
+It looks every stored id up on `api.bgm.tv` and compares episode names. Everything
+below the threshold is printed — which is **not** the same as "wrong": file-name
+titles, fan-sub translations and English-only entries all raise false alarms.
+
+**Offline variant (recommended)**: the Bangumi plugin ships a local archive
+(`{config}/data/bangumi/archive/`). Reading it costs no API quota — a 2000-episode
+library finishes in about fifteen seconds:
+
+```bash
+jbmid verify --library Anime --archive /path/to/bangumi/archive --out check.json
+```
+
+The offline run checks more, because order is more reliable than names:
+
+- `unknown_id`: the stored id does not exist in the archive
+- `duplicate`: one bgm episode id used by two local episodes (usually a Season 0 special borrowing a TV id)
+- `disorder`: within one season the bgm `sort` values no longer walk `n, n+1, n+2…`
+- `foreign_subject`: the episode lives in another subject and is the only one doing so
+- `anchor_unused`: no episode uses the series-level id — how a stale anchor shows up
+- `duplicate_series`: the same show is registered twice (e.g. `/hdd` and `/strm`)
+
 
 ### 6. `protect` — stop a later refresh from overwriting your IDs
 

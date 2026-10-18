@@ -15,7 +15,7 @@ from .jellyfin import Jellyfin
 from .scan import apply_report, log, rollback, run_scan, run_specials
 from .season import load_mapping, scan_seasons
 from .transport import force_ipv4
-from .verify import run_verify
+from .verify import run_verify, run_verify_offline
 
 DEFAULT_URL = os.environ.get("JF_URL", "http://127.0.0.1:8096")
 DEFAULT_KEY = os.environ.get("JF_API_KEY", "")
@@ -110,6 +110,11 @@ def cmd_auto(args: argparse.Namespace) -> int:
 
 
 def cmd_verify(args: argparse.Namespace) -> int:
+    if getattr(args, "archive", None):
+        jf, _ = clients(args)
+        report = run_verify_offline(jf, args.archive, library=args.library, limit=args.limit,
+                                    threshold=args.threshold, out=args.out)
+        return 0 if report["checked"] else 1
     jf, bgm = clients(args)
     report = run_verify(jf, bgm, library=args.library, limit=args.limit,
                         threshold=args.threshold, out=args.out)
@@ -205,6 +210,8 @@ def build_parser() -> argparse.ArgumentParser:
 
     p = sub.add_parser("verify", help="read-only check of every stored id")
     common(p)
+    p.add_argument("--archive", metavar="DIR",
+                   help="answer from the plugin's offline archive (*.jsonlines) instead of the API")
     p.add_argument("--library")
     p.add_argument("--limit", type=int)
     p.add_argument("--threshold", type=float, default=0.45)

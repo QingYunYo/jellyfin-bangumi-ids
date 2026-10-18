@@ -178,6 +178,22 @@ jbmid verify --library 动漫 --out check.json
 相似度低于阈值的全列出来——注意这**不等于错了**：文件名式集名、
 纯翻译差异、英文名条目都会误报，需要人眼扫一遍。
 
+**用离线库跑（推荐）**：Bangumi 插件自带一份离线档案（`{配置目录}/data/bangumi/archive/`），
+读它不占 API 配额，整个库 2000 多集十几秒跑完：
+
+```bash
+jbmid verify --library 动漫 --archive /path/to/bangumi/archive --out check.json
+```
+
+离线版比在线版多查几项，因为顺序比名字可靠：
+
+- `unknown_id`：库里存的 ID 在档案中不存在（过期或写错）
+- `duplicate`：同一个 bgm 集 ID 被两集共用（多半是 Season 0 特别篇借了正片的 ID）
+- `disorder`：同一季里 ID 对应的 bgm `sort` 不是 `n, n+1, n+2…` 连续递增（错位/串条）
+- `foreign_subject`：这一集属于另一个 bgm 条目，且只有它一个（孤儿 ID）
+- `anchor_unused`：剧集级 Bangumi ID 没有任何一集在用——物语系列、凉宫的脏锚点就是这么查出来的
+- `duplicate_series`：同一部剧在库里登记了两份（例如 `/hdd` 与 `/strm` 各一套）
+
 ### 6. `protect`：防止下次刷新把 ID 覆盖回去
 
 ```bash
