@@ -171,9 +171,9 @@ Bangumi
 只依赖 Python 标准库，Python ≥ 3.8。
 
 ```bash
-pip install git+https://github.com/<you>/jellyfin-bangumi-ids.git
+pip install git+https://github.com/QingYunYo/jellyfin-bangumi-ids.git
 # 或者本地开发
-git clone https://github.com/<you>/jellyfin-bangumi-ids.git
+git clone https://github.com/QingYunYo/jellyfin-bangumi-ids.git
 cd jellyfin-bangumi-ids && pip install -e .
 ```
 
