@@ -330,14 +330,20 @@ searches titles fuzzily and aborts with an error when it finds duplicates, so yo
 `skipped_specials`. For "SP inserted as episode 8.5", use `season` mode with `"sp": true`.
 
 **One TMDB season = two Bangumi subjects**
-Exactly what `season` mode is for: point season 1 at the first subject and season 2 at the second.
-If the two subjects are related as "sequel" on Bangumi, `scan` mode can also stitch them together.
+If the two subjects are related as "sequel" on Bangumi, `scan` / `auto` align seasons for you: each
+local season first claims its own run of chain subjects, then episodes are compared season by season
+(see ④ below). `season` mode is only needed when the tool cannot tell (no episode title matches and
+no ids stored in the library).
 
 **My library uses English titles — does matching still work?**
 Yes, but it depends on the language of the episode titles on Bangumi. Western shows (`Rick and
 Morty`) have English episode names on bgm, so per-episode similarity works. Japanese anime store
 `name` in Japanese and `name_cn` in Chinese; an English local title scores 0 against both. Matching
-then falls back to "equal counts → map by order". If the counts also differ, the show goes to
+then leans on two other signals: **Bangumi episode ids already stored in the library** (which subject's
+pool each id belongs to) and "equal counts → map by order". Rick and Morty is resolved by the first two:
+season 5 holds only 9 episodes with titles that match nothing, but the stored ids look exactly like
+Bangumi's 10-episode subject minus one, so the missing episode is placed correctly. If none of the
+three signals adds up, the show goes to
 `review` — use `season` mode, or fix the metadata first.
 
 **Is `--library` case-sensitive?**
@@ -401,6 +407,13 @@ otherwise the show goes straight to `review` — no gambling.
 
 - *Segments*: when the number of local seasons equals the number of subjects on the chain, each
   season is aligned only against its own subject, preventing cross-season drift.
+- *Season alignment* (when those counts differ): every local season is scored against every subject
+  on the chain (an episode-title fingerprint matrix), then an order-preserving DP assigns each season
+  a consecutive run of subjects. One subject may host several seasons, a single-episode movie in the
+  middle is simply skipped, and a season may cover only part of a subject. Only real evidence counts —
+  coverage ≥ 90% with mean similarity ≥ 0.55, or stored Bangumi episode ids that all land inside the
+  run in increasing order. A pure positional guess is not evidence; if any step does not add up the
+  plan is dropped and the flat pool is used, exactly as before.
 - *Variant splitting*: `S01E18 - [Group] 白夜`, `进击的巨人 - S03E18 - 白夜`, `「…」『…』`,
   `A／B` all yield candidate titles, compared one by one against `name_cn` / `name`.
 - *Monotonic*: dynamic programming maximizes total score while preserving order — episode 5 can
@@ -427,10 +440,20 @@ Matching is **monotonic optimal** (order-preserving), then "equal gaps on both s
 1:1" handles translation differences (`觉悟` vs `決心`).
 
 **Avoiding cross-season drift**: when the number of local seasons equals the number of subjects on
-the Bangumi chain, each season is aligned only against **its own** subject; otherwise (a show split
-into 6 subjects, 3 seasons in your library) the whole chain becomes one pool. Pool-wide alignment
-lets one missing episode in an earlier season shift every later season by one — the classic way
-tools like this break.
+the Bangumi chain, each season is aligned only against **its own** subject. When the counts differ,
+season alignment runs first (see above) and each season still gets its own run of subjects; only if
+that fails does the whole chain become one pool. Pool-wide alignment lets one missing episode in an
+earlier season shift every later season by one — the classic way tools like this break.
+
+Shapes season alignment resolves:
+
+| Your library | Bangumi chain | Outcome |
+| --- | --- | --- |
+| 2 seasons: `[UBW]` S1 12 eps, S2 13 eps | `Fate/Zero`(25) → `UBW S1`(13) → `UBW S2`(13) | 25 episodes against a 51-episode pool is `size mismatch`; aligned per season it maps `S1→95225 S2→109386` |
+| 3 seasons: 22 / 11 / 8 eps | 4 TV subjects plus 4 single-episode movies in between | the movie run is skipped, `S3→277105` |
+| 7 seasons, one of them only 9 episodes | 7 TV subjects plus 3 empty ones | titles match nothing, stored episode ids locate the hole |
+
+The report's `notes` spells it out: `season map 1:S1->95225 2:S2->109386`.
 
 **When it writes**: counts are equal, or (counts are close + hit rate ≥ 90% + mean similarity
 ≥ 0.55). If neither holds, the show goes to `review` and not a single episode is touched.
@@ -451,8 +474,9 @@ tools like this break.
 | --- | --- |
 | filenames as titles: `S01E01 - [CASO&DMG] 夏の…` | variant split strips `[group]` and `SxxExx` before comparing |
 | titles like `Show - S03E18 - 白夜` | takes the last dash-separated segment as the title |
-| one TMDB season / two Bangumi parts | builds a pool from the sequel chain; still unmatched → `review` |
+| one TMDB season / two Bangumi parts | builds the sequel chain, then aligns seasons by title fingerprint; still unmatched → `review` |
 | one season has two extra episodes, shifting the rest | per-season segmented alignment, no cross-season drift |
+| single-episode movies or unaired seasons sit on the chain | season alignment may skip whole runs instead of inflating the pool |
 | the chain wrongly includes a "season 2" | size guard rejects it (13 episodes vs 26 → `review`) |
 | titles are pure Japanese or pure numbers | positional mapping when counts match, flagged in the report |
 | specials in Season 0 or in the title | excluded from regular modes; `special` mode uses `type=1` |

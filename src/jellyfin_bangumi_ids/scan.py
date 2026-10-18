@@ -7,6 +7,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from .match import (align, episode_similarity, fill_gaps, is_special, name_match, similarity,
                     title_keys)
+from .season_align import plan_segments
 
 OK, REVIEW = "ok", "review"
 
@@ -246,27 +247,35 @@ def _fit_chain(bgm, chain: List[int], anchor: int, local_total: int) -> List[int
     return chain
 
 
-def _segments(jf, bgm, series: Dict[str, Any], chain: List[int]
-              ) -> Tuple[List[Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]], int]:
+def _season_groups(jf, series: Dict[str, Any]
+                   ) -> Tuple[List[List[Dict[str, Any]]], int]:
+    """Local main-season episodes, grouped by season, specials dropped and counted."""
+    groups: List[List[Dict[str, Any]]] = []
+    skipped = 0
+    for season in jf.seasons(series["Id"]):
+        if (season.get("IndexNumber") or 0) < 1:
+            skipped += len(jf.season_episodes(season["Id"]))
+            continue
+        episodes = jf.season_episodes(season["Id"])
+        kept = [e for e in episodes if not is_special(e.get("Name") or "")]
+        skipped += len(episodes) - len(kept)
+        groups.append(kept)
+    return groups, skipped
+
+
+def _segments(groups: List[List[Dict[str, Any]]], bgm, chain: List[int]
+              ) -> List[Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]]:
     """Split local episodes into the groups we align against one pool at a time.
 
     When the number of local seasons equals the number of subjects in the chain,
     each season is aligned against its own subject -- aligning the whole series
     against the whole chain makes one missing episode shift every later season.
+    Every other shape falls back to one flat pool.
     """
-    seasons = [s for s in jf.seasons(series["Id"]) if (s.get("IndexNumber") or 0) >= 1]
-    groups: List[List[Dict[str, Any]]] = []
-    skipped = 0
-    for season in seasons:
-        episodes = jf.season_episodes(season["Id"])
-        kept = [e for e in episodes if not is_special(e.get("Name") or "")]
-        skipped += len(episodes) - len(kept)
-        groups.append(kept)
     if len(groups) == len(chain) and all(groups):
-        pairs = [(g, bgm.episode_list(sid)) for g, sid in zip(groups, chain)]
-        return pairs, skipped
-    flat = [e for g in groups for e in g]
-    return [(flat, build_pool(bgm, chain))], skipped
+        return [(group, bgm.episode_list(sid)) for group, sid in zip(groups, chain)]
+    flat = [episode for group in groups for episode in group]
+    return [(flat, build_pool(bgm, chain))]
 
 
 def _align_segment(local: List[Dict[str, Any]], pool: List[Dict[str, Any]],
@@ -279,6 +288,65 @@ def _align_segment(local: List[Dict[str, Any]], pool: List[Dict[str, Any]],
 
 def _size_ok(local: int, pool: int) -> bool:
     return abs(pool - local) <= max(2, int(0.15 * max(local, 1)))
+
+
+def _match_segments(segments: List[Tuple[List[Dict[str, Any]], List[Dict[str, Any]], Any]],
+                    threshold: float, strict_size: bool = True
+                    ) -> Tuple[List[Dict[str, Any]], int, float, int, List[str], List[str]]:
+    """Align every segment and collate the per-episode rows.
+
+    A segment carries an optional third element: the pairs of a season plan. Those
+    already proved their window, so ``strict_size`` (the flat-pool sanity gates)
+    is skipped for them and only duplicate episode ids are checked.
+    """
+    matched = 0
+    sim_sum = 0.0
+    total_local = 0
+    problems: List[str] = []
+    notes: List[str] = []
+    episodes: List[Dict[str, Any]] = []
+    for local, pool, planned_pairs in segments:
+        total_local += len(local)
+        if not pool:
+            problems.append("empty Bangumi pool")
+            continue
+        if planned_pairs is None:
+            pairs, sequenced = _align_segment(local, pool, threshold)
+        else:
+            pairs, sequenced = planned_pairs, len(pool) == len(local)
+        if sequenced and pairs:
+            pairs, kept = _keep_existing_ids(local, pool, pairs)
+            if kept:
+                notes.append("kept %d existing ids (library order differs from Bangumi)" % kept)
+        coverage = len(pairs) / float(len(local)) if local else 0.0
+        mean_sim = (sum(similarity(local[i].get("Name") or "",
+                                   pool[j].get("name_cn") or pool[j].get("name") or "")
+                        for i, j in pairs) / len(pairs)) if pairs else 0.0
+        matched += len(pairs)
+        sim_sum += mean_sim * len(pairs)
+        if strict_size:
+            if not _size_ok(len(local), len(pool)):
+                problems.append("size mismatch %d local vs %d pool" % (len(local), len(pool)))
+            elif not sequenced and (coverage < 0.9 or mean_sim < 0.55):
+                problems.append("weak match: coverage %.0f%%, mean sim %.2f"
+                                % (coverage * 100, mean_sim))
+        for i, j in pairs:
+            ep, bgm_ep = local[i], pool[j]
+            current = (ep.get("ProviderIds") or {}).get("Bangumi")
+            target = str(bgm_ep["id"])
+            episodes.append({
+                "item_id": ep["Id"], "season": ep.get("ParentIndexNumber"),
+                "index": ep.get("IndexNumber"), "name": ep.get("Name"),
+                "bgm_id": target, "bgm_name": bgm_ep.get("name_cn") or bgm_ep.get("name"),
+                "old": current, "change": str(current) != target,
+                "sim": round(similarity(ep.get("Name") or "",
+                                        bgm_ep.get("name_cn") or bgm_ep.get("name") or ""), 3),
+            })
+    if not strict_size:
+        ids = [e["bgm_id"] for e in episodes]
+        if len(set(ids)) != len(ids):
+            problems.append("duplicate Bangumi episode ids after season alignment")
+    return episodes, matched, sim_sum, total_local, problems, notes
 
 
 def scan_series(jf, bgm, series: Dict[str, Any], allow_search: bool = True,
@@ -298,61 +366,36 @@ def scan_series(jf, bgm, series: Dict[str, Any], allow_search: bool = True,
 
     entry["anchor"], entry["anchor_how"] = sid, how
     chain = bgm.chain(sid)
-    local_total = 0
-    for season in jf.seasons(series["Id"]):
-        if (season.get("IndexNumber") or 0) < 1:
-            continue
-        local_total += len([e for e in jf.season_episodes(season["Id"])
-                            if not is_special(e.get("Name") or "")])
-    fitted = _fit_chain(bgm, chain, sid, local_total)
-    if len(fitted) != len(chain):
-        entry["notes"].append("chain trimmed to %d subject(s)" % len(fitted))
-    chain = fitted
-    entry["chain"] = chain
-    segments, skipped = _segments(jf, bgm, series, chain)
+    groups, skipped = _season_groups(jf, series)
     entry["skipped_specials"] = skipped
-    total_local = sum(len(local) for local, _ in segments)
+    total_local = sum(len(group) for group in groups)
     if not total_local:
         entry["reason"] = "no episodes"
         return entry
 
-    matched = 0
-    sim_sum = 0.0
-    problems: List[str] = []
-    episodes: List[Dict[str, Any]] = []
-    for local, pool in segments:
-        if not pool:
-            problems.append("empty Bangumi pool")
-            continue
-        pairs, sequenced = _align_segment(local, pool, threshold)
-        if sequenced and pairs:
-            pairs, kept = _keep_existing_ids(local, pool, pairs)
-            if kept:
-                entry["notes"].append("kept %d existing ids (library order differs from Bangumi)" % kept)
-        coverage = len(pairs) / float(len(local))
-        mean_sim = (sum(similarity(local[i].get("Name") or "",
-                                   pool[j].get("name_cn") or pool[j].get("name") or "")
-                        for i, j in pairs) / len(pairs)) if pairs else 0.0
-        matched += len(pairs)
-        sim_sum += mean_sim * len(pairs)
-        if not _size_ok(len(local), len(pool)):
-            problems.append("size mismatch %d local vs %d pool" % (len(local), len(pool)))
-        elif not sequenced and (coverage < 0.9 or mean_sim < 0.55):
-            problems.append("weak match: coverage %.0f%%, mean sim %.2f" % (coverage * 100, mean_sim))
-        for i, j in pairs:
-            ep, bgm_ep = local[i], pool[j]
-            current = (ep.get("ProviderIds") or {}).get("Bangumi")
-            target = str(bgm_ep["id"])
-            episodes.append({
-                "item_id": ep["Id"], "season": ep.get("ParentIndexNumber"),
-                "index": ep.get("IndexNumber"), "name": ep.get("Name"),
-                "bgm_id": target, "bgm_name": bgm_ep.get("name_cn") or bgm_ep.get("name"),
-                "old": current, "change": str(current) != target,
-                "sim": round(similarity(ep.get("Name") or "",
-                                        bgm_ep.get("name_cn") or bgm_ep.get("name") or ""), 3),
-            })
-
-    entry["coverage"] = matched / float(total_local)
+    fitted = _fit_chain(bgm, chain, sid, total_local)
+    if len(fitted) != len(chain):
+        entry["notes"].append("chain trimmed to %d subject(s)" % len(fitted))
+    chain = fitted
+    entry["chain"] = chain
+    segments = [(local, pool, None) for local, pool in _segments(groups, bgm, chain)]
+    episodes, matched, sim_sum, total_local, problems, kept_notes = _match_segments(
+        segments, threshold)
+    if problems:
+        # The flat shape failed; try to place each local season on its own run of
+        # subjects before falling back to the review we would have reported. Only a
+        # plan with real evidence beats the review: a purely positional guess would
+        # hide the mismatch that made the flat pool fail in the first place.
+        plan = plan_segments(groups, chain, bgm, threshold)
+        if plan is not None and any(kind != "order" for kind in plan.kinds):
+            alt = _match_segments(list(plan.segments), threshold, strict_size=False)
+            if not alt[4]:
+                episodes, matched, sim_sum, total_local = alt[0], alt[1], alt[2], alt[3]
+                problems = []
+                kept_notes = alt[5]
+                entry["notes"].append("season map %s" % plan.summary())
+    entry["notes"].extend(kept_notes)
+    entry["coverage"] = matched / float(total_local) if total_local else 0.0
     entry["mean_sim"] = (sim_sum / matched) if matched else 0.0
     entry["episodes"] = episodes
     if problems:

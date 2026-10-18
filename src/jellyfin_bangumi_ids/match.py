@@ -97,6 +97,20 @@ def align(local_names: Sequence[str], pool: Sequence[Dict[str, Any]],
     if not n or not m:
         return []
     scores = [[episode_similarity(local_names[i], pool[j]) for j in range(m)] for i in range(n)]
+    return align_scores(scores, threshold)
+
+
+def align_scores(scores: Sequence[Sequence[float]],
+                 threshold: float = 0.45) -> List[Tuple[int, int]]:
+    """Monotonic best alignment over a precomputed similarity matrix.
+
+    Season-level planning scores the same local episodes against many candidate
+    pools; the matrix is built once and reused here.
+    """
+    n = len(scores)
+    m = len(scores[0]) if n else 0
+    if not n or not m:
+        return []
     neg = float("-inf")
     dp = [[neg] * (m + 1) for _ in range(n + 1)]
     back = [[None] * (m + 1) for _ in range(n + 1)]
