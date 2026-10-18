@@ -160,7 +160,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     p = sub.add_parser("scan", help="scan a library and write a report")
     common(p)
-    p.add_argument("--library", help="library name, e.g. 动漫")
+    p.add_argument("--library", help="library name, e.g. Anime (case-insensitive)")
     p.add_argument("--limit", type=int)
     p.add_argument("--threshold", type=float, default=0.45, help="name similarity gate (0-1)")
     p.add_argument("--no-search", action="store_true", help="do not search bgm by title")
@@ -169,7 +169,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     p = sub.add_parser("special", help="match SP/OVA episodes too (type=1 on Bangumi)")
     common(p)
-    p.add_argument("--library", help="library name, e.g. 动漫")
+    p.add_argument("--library", help="library name, e.g. Anime (case-insensitive)")
     p.add_argument("--limit", type=int)
     p.add_argument("--out", default="jbmid-specials.json")
     p.set_defaults(func=cmd_special)

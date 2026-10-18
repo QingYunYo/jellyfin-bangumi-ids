@@ -47,12 +47,27 @@ class Jellyfin:
         data = self.get("/Library/MediaFolders") or {}
         return {f["Name"]: f["Id"] for f in data.get("Items", [])}
 
+    def library_id(self, name: str) -> Optional[str]:
+        """Resolve a library name case-insensitively, then by unambiguous substring."""
+        libs = self.libraries()
+        if name in libs:
+            return libs[name]
+        low = name.strip().lower()
+        for lib_name, lib_id in libs.items():
+            if lib_name.strip().lower() == low:
+                return lib_id
+        partial = [n for n in libs if low in n.lower()]
+        if len(partial) == 1:
+            return libs[partial[0]]
+        available = ", ".join(sorted(libs)) or "(none)"
+        if not partial:
+            raise SystemExit("unknown library: %s (available: %s)" % (name, available))
+        raise SystemExit("ambiguous library %r: %s" % (name, ", ".join(sorted(partial))))
+
     def all_series(self, parent: Optional[str] = None, limit: Optional[int] = None,
                    library_name: Optional[str] = None) -> List[Dict[str, Any]]:
         if library_name and not parent:
-            parent = self.libraries().get(library_name)
-            if not parent:
-                raise SystemExit("unknown library: %s" % library_name)
+            parent = self.library_id(library_name)
         out: List[Dict[str, Any]] = []
         start = 0
         while True:
@@ -97,7 +112,7 @@ class Jellyfin:
                                                             e.get("IndexNumber") or 0))
 
     def find_series(self, name: str, library_name: Optional[str] = None) -> Dict[str, Any]:
-        parent = self.libraries().get(library_name) if library_name else None
+        parent = self.library_id(library_name) if library_name else None
         exact = [s for s in self.all_series(parent=parent) if s["Name"] == name]
         if len(exact) > 1:
             raise SystemExit("ambiguous series name %r (%d matches)" % (name, len(exact)))

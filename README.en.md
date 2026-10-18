@@ -229,6 +229,17 @@ searches titles fuzzily and aborts with an error when it finds duplicates, so yo
 Exactly what `season` mode is for: point season 1 at the first subject and season 2 at the second.
 If the two subjects are related as "sequel" on Bangumi, `scan` mode can also stitch them together.
 
+**My library uses English titles — does matching still work?**
+Yes, but it depends on the language of the episode titles on Bangumi. Western shows (`Rick and
+Morty`) have English episode names on bgm, so per-episode similarity works. Japanese anime store
+`name` in Japanese and `name_cn` in Chinese; an English local title scores 0 against both. Matching
+then falls back to "equal counts → map by order". If the counts also differ, the show goes to
+`review` — use `season` mode, or fix the metadata first.
+
+**Is `--library` case-sensitive?**
+No. Exact match first, then case-insensitive, then a unique substring; if nothing matches it lists
+the available library names.
+
 ## Where the data comes from
 
 Only three sources, none of which needs anything installed:

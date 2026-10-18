@@ -226,17 +226,17 @@ def scan_specials(jf, bgm, series: Dict[str, Any], min_sim: float = 0.55) -> Dic
     entry["chain"] = chain
     pool = build_special_pool(bgm, chain)
     if not pool:
-        entry["reason"] = "Bangumi 上没有该剧的 SP/OVA 条目"
+        entry["reason"] = "no SP/OVA episodes for this show on Bangumi"
         return entry
     locals_ = collect_local_specials(jf, series)
     if not locals_:
-        entry["reason"] = "库里没有番外集"
+        entry["reason"] = "no special episodes in the library"
         return entry
 
     local_names = [x["name"] for x in locals_]
     positional = False
     if len(pool) == len(locals_) and len(pool) <= 3:
-        # 整条链上就几个 SP，且数量正好对上——顺序映射；但仍要有个最低相似度兜底
+        # only a few SPs on the whole chain and the count matches: map by order, with a similarity floor
         pairs = [(i, i, episode_similarity(local_names[i], pool[i])) for i in range(len(pool))]
         pairs = [p for p in pairs if p[2] >= 0.25]
         positional = True
@@ -263,7 +263,7 @@ def scan_specials(jf, bgm, series: Dict[str, Any], min_sim: float = 0.55) -> Dic
         })
     entry["to_write"] = sum(1 for e in entry["episodes"] if e["change"])
     if matched == 0:
-        entry["reason"] = "没有一集达到相似度门槛"
+        entry["reason"] = "no episode reached the similarity threshold"
     elif positional and matched == len(pool):
         entry["status"] = OK
     elif mean < min_sim:
