@@ -1,0 +1,21 @@
+{
+  "物语系列": {
+    "1":  {"subjects": [1671]},
+    "2":  {"subjects": [23161]},
+    "3":  {"subjects": [56117]},
+    "4":  {"subjects": [68812], "filter": "猫物语（白）"},
+    "5":  {"subjects": [68812], "filter": "倾物语"},
+    "6":  {"subjects": [82322]},
+    "7":  {"subjects": [68812], "filter": "囮物语"},
+    "8":  {"subjects": [68812], "filter": "鬼物语"},
+    "9":  {"subjects": [68812], "filter": "恋物语"},
+    "10": {"subjects": [115932]},
+    "11": {"subjects": [146104]},
+    "12": {"subjects": [138829]},
+    "13": {"subjects": [233926]},
+    "14": {"subjects": [475354], "filter": "愚物语"},
+    "15": {"subjects": [475354], "filter": "业物语|残酷童话"},
+    "16": {"subjects": [475354], "filter": "抚物语"},
+    "17": {"subjects": [475354], "filter": "忍物语"}
+  }
+}
