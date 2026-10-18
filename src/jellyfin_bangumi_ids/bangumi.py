@@ -1,6 +1,7 @@
 """Minimal Bangumi (bgm.tv) API client — only the endpoints this tool needs."""
 from __future__ import annotations
 
+import json
 import time
 from typing import Any, Dict, Iterable, List, Optional, Sequence
 
@@ -50,10 +51,10 @@ class Bangumi:
             raw = request(
                 build_url(self.base, "/v0/search/subjects"),
                 headers=dict(self._headers(), **{"Content-Type": "application/json"}),
-                body=__import__("json").dumps(payload).encode(),
+                body=json.dumps(payload).encode(),
                 method="POST", timeout=self.timeout, retries=self.retries,
             )
-            data = __import__("json").loads(raw.decode())
+            data = json.loads(raw.decode())
             return (data.get("data") or [])[:limit]
         except (HttpError, ValueError):
             data = self.get("/search/subject/" + keyword, {"type": 2}) or {}
@@ -106,21 +107,3 @@ class Bangumi:
         eps = [e for e in self.episodes(subject_id, 0) if e.get("name") or e.get("name_cn")]
         eps.sort(key=lambda e: e.get("sort") or 0)
         return eps
-
-    def pool(self, subjects: Sequence[int], types: Iterable[int] = (0,),
-             include_special: bool = False, pattern: Optional[str] = None) -> List[Dict[str, Any]]:
-        """Concatenate episodes of several subjects into one ordered pool."""
-        import re
-
-        regex = re.compile(pattern) if pattern else None
-        out: List[Dict[str, Any]] = []
-        for sid in subjects:
-            for ep_type in (types if include_special else (0,)):
-                for ep in self.episodes(sid, ep_type):
-                    if regex and not regex.search((ep.get("name_cn") or "") + (ep.get("name") or "")):
-                        continue
-                    if not include_special and ep_type == 1 and not pattern:
-                        continue
-                    out.append(ep)
-        out.sort(key=lambda e: (e.get("subject_id") or 0, e.get("sort") or 0))
-        return out

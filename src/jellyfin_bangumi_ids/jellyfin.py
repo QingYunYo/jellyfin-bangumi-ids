@@ -4,7 +4,7 @@ from __future__ import annotations
 import json
 from typing import Any, Dict, List, Optional
 
-from .transport import HttpError, build_url, get_json, request
+from .transport import build_url, get_json, request
 
 BANGUMI_PLUGIN_GUID = "41b59f1b-a6cf-474a-b416-785379cbd856"
 

@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import re
-import sys
 from typing import Any, Dict, List, Optional
 
 from .match import align, is_special, name_match, similarity

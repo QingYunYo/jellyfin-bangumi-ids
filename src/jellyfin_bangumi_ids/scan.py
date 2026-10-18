@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import json
-import os
 import sys
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -15,7 +14,7 @@ def log(msg: str) -> None:
     print(msg, file=sys.stderr, flush=True)
 
 
-def series_anchor(bgm, series: Dict[str, Any]) -> Tuple[Optional[int], str]:
+def series_anchor(series: Dict[str, Any]) -> Tuple[Optional[int], str]:
     """Existing Bangumi id on the series is the cheapest, most reliable anchor."""
     pid = (series.get("ProviderIds") or {}).get("Bangumi")
     if pid and str(pid).isdigit():
@@ -77,6 +76,41 @@ def build_pool(bgm, chain: List[int]) -> List[Dict[str, Any]]:
     return pool
 
 
+def _segments(jf, bgm, series: Dict[str, Any], chain: List[int]
+              ) -> Tuple[List[Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]], int]:
+    """Split local episodes into the groups we align against one pool at a time.
+
+    When the number of local seasons equals the number of subjects in the chain,
+    each season is aligned against its own subject -- aligning the whole series
+    against the whole chain makes one missing episode shift every later season.
+    """
+    seasons = [s for s in jf.seasons(series["Id"]) if (s.get("IndexNumber") or 0) >= 1]
+    groups: List[List[Dict[str, Any]]] = []
+    skipped = 0
+    for season in seasons:
+        episodes = jf.season_episodes(season["Id"])
+        kept = [e for e in episodes if not is_special(e.get("Name") or "")]
+        skipped += len(episodes) - len(kept)
+        groups.append(kept)
+    if len(groups) == len(chain) and all(groups):
+        pairs = [(g, bgm.episode_list(sid)) for g, sid in zip(groups, chain)]
+        return pairs, skipped
+    flat = [e for g in groups for e in g]
+    return [(flat, build_pool(bgm, chain))], skipped
+
+
+def _align_segment(local: List[Dict[str, Any]], pool: List[Dict[str, Any]],
+                   threshold: float) -> Tuple[List[Tuple[int, int]], bool]:
+    if len(pool) == len(local):
+        return [(i, i) for i in range(len(local))], True
+    return fill_gaps(align([e.get("Name") or "" for e in local], pool, threshold),
+                     len(local), len(pool)), False
+
+
+def _size_ok(local: int, pool: int) -> bool:
+    return abs(pool - local) <= max(2, int(0.15 * max(local, 1)))
+
+
 def scan_series(jf, bgm, series: Dict[str, Any], allow_search: bool = True,
                 threshold: float = 0.45) -> Dict[str, Any]:
     entry: Dict[str, Any] = {
@@ -86,13 +120,7 @@ def scan_series(jf, bgm, series: Dict[str, Any], allow_search: bool = True,
         "chain": [], "episodes": [], "to_write": 0, "coverage": 0.0, "mean_sim": 0.0,
         "skipped_specials": 0, "notes": [],
     }
-    local, skipped = collect_local_episodes(jf, series)
-    entry["skipped_specials"] = skipped
-    if not local:
-        entry["reason"] = "no episodes"
-        return entry
-
-    sid, how = series_anchor(bgm, series)
+    sid, how = series_anchor(series)
     if not sid:
         sid, how = season_anchor(bgm, jf, series)
     if not sid and allow_search:
@@ -105,42 +133,53 @@ def scan_series(jf, bgm, series: Dict[str, Any], allow_search: bool = True,
     entry["anchor"], entry["anchor_how"] = sid, how
     chain = bgm.chain(sid)
     entry["chain"] = chain
-    pool = build_pool(bgm, chain)
-    if not pool:
-        entry["reason"] = "empty Bangumi episode pool"
+    segments, skipped = _segments(jf, bgm, series, chain)
+    entry["skipped_specials"] = skipped
+    total_local = sum(len(local) for local, _ in segments)
+    if not total_local:
+        entry["reason"] = "no episodes"
         return entry
 
-    if len(pool) == len(local):
-        pairs = [(i, i) for i in range(len(local))]
-        seq = True
-    else:
-        pairs = fill_gaps(align([e.get("Name") or "" for e in local], pool, threshold), len(local), len(pool))
-        seq = False
+    matched = 0
+    sim_sum = 0.0
+    problems: List[str] = []
+    episodes: List[Dict[str, Any]] = []
+    for local, pool in segments:
+        if not pool:
+            problems.append("empty Bangumi pool")
+            continue
+        pairs, sequenced = _align_segment(local, pool, threshold)
+        coverage = len(pairs) / float(len(local))
+        mean_sim = (sum(similarity(local[i].get("Name") or "",
+                                   pool[j].get("name_cn") or pool[j].get("name") or "")
+                        for i, j in pairs) / len(pairs)) if pairs else 0.0
+        matched += len(pairs)
+        sim_sum += mean_sim * len(pairs)
+        if not _size_ok(len(local), len(pool)):
+            problems.append("size mismatch %d local vs %d pool" % (len(local), len(pool)))
+        elif not sequenced and (coverage < 0.9 or mean_sim < 0.55):
+            problems.append("weak match: coverage %.0f%%, mean sim %.2f" % (coverage * 100, mean_sim))
+        for i, j in pairs:
+            ep, bgm_ep = local[i], pool[j]
+            current = (ep.get("ProviderIds") or {}).get("Bangumi")
+            target = str(bgm_ep["id"])
+            episodes.append({
+                "item_id": ep["Id"], "season": ep.get("ParentIndexNumber"),
+                "index": ep.get("IndexNumber"), "name": ep.get("Name"),
+                "bgm_id": target, "bgm_name": bgm_ep.get("name_cn") or bgm_ep.get("name"),
+                "old": current, "change": str(current) != target,
+                "sim": round(similarity(ep.get("Name") or "",
+                                        bgm_ep.get("name_cn") or bgm_ep.get("name") or ""), 3),
+            })
 
-    entry["coverage"] = len(pairs) / float(len(local))
-    entry["mean_sim"] = (sum(similarity(local[i].get("Name") or "", pool[j].get("name_cn") or pool[j].get("name") or "")
-                             for i, j in pairs) / len(pairs)) if pairs else 0.0
-    consistent = len(pool) == len(local) or (entry["coverage"] >= 0.9 and entry["mean_sim"] >= 0.55)
-    if not consistent:
-        entry["reason"] = "count/name mismatch: local %d vs pool %d, coverage %.0f%%, mean sim %.2f" % (
-            len(local), len(pool), entry["coverage"] * 100, entry["mean_sim"])
+    entry["coverage"] = matched / float(total_local)
+    entry["mean_sim"] = (sim_sum / matched) if matched else 0.0
+    entry["episodes"] = episodes
+    if problems:
         entry["status"] = REVIEW
+        entry["reason"] = "; ".join(problems)
     else:
         entry["status"] = OK
-
-    episodes = []
-    for i, j in pairs:
-        ep, bgm_ep = local[i], pool[j]
-        sim = similarity(ep.get("Name") or "", bgm_ep.get("name_cn") or bgm_ep.get("name") or "")
-        current = (ep.get("ProviderIds") or {}).get("Bangumi")
-        episodes.append({
-            "item_id": ep["Id"], "season": ep.get("ParentIndexNumber"),
-            "index": ep.get("IndexNumber"), "name": ep.get("Name"),
-            "bgm_id": str(bgm_ep["id"]), "bgm_name": bgm_ep.get("name_cn") or bgm_ep.get("name"),
-            "old": current, "change": str(current) != str(bgm_ep["id"]), "sim": round(sim, 3),
-        })
-    entry["episodes"] = episodes
-    if entry["status"] == OK:
         entry["to_write"] = sum(1 for e in episodes if e["change"])
     return entry
 

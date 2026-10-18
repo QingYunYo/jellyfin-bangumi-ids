@@ -118,7 +118,7 @@ def cmd_doctor(args: argparse.Namespace) -> int:
     info = jf.get("/System/Info") or {}
     print("jellyfin  : %s (%s)" % (info.get("Version"), args.url))
     libs = jf.libraries()
-    print("libraries : %s" % ", ".join("%s=%d" % (k, 1) for k in libs) if libs else "libraries : none")
+    print("libraries : %d (%s)" % (len(libs), ", ".join(libs)) if libs else "libraries : none")
     start = time.time()
     try:
         subject = bgm.subject(1671)
