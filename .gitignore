@@ -11,3 +11,4 @@ venv/
 *-ids.json
 report.json
 bgmcheck.json
+jbmid-*.json
