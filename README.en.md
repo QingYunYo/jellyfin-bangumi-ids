@@ -67,8 +67,9 @@ export JF_API_KEY=your-key
 jbmid doctor
 ```
 
-`doctor` reports the Jellyfin version, your libraries, whether `bgm.tv` is reachable, and the
-plugin's configuration state. Get all four green before going further.
+`doctor` reports the Jellyfin version, your libraries, whether `bgm.tv` is reachable, the
+plugin's configuration state, and whether the offline archive was found (`archive : …`; when it
+is unreadable it tells you to pass `--archive DIR`). Get everything green before going further.
 
 ## Quick start
 
@@ -96,7 +97,7 @@ jbmid rollback jbmid-backup.json
 
 The Bangumi plugin ships a local database: run its "update offline database" task once and it
 downloads subject / episode / person dumps into `{Jellyfin data dir}/bangumi/archive/`
-(`/config/data/bangumi/archive` in Docker, about 1.4 GB, refreshed every couple of weeks).
+(`/config/data/bangumi/archive` in Docker, about 1.5 GB, refreshed every couple of weeks).
 
 This tool **uses that archive by default** — no extra setup:
 
@@ -109,13 +110,13 @@ jbmid scan --library Anime --no-archive                 # force the online API
 
 Resolution order: `--archive` → `JBMID_ARCHIVE` → `DataPath` from Jellyfin's `/System/Info`.
 
-**The first run builds an index.** 1.4 GB of jsonlines is too much to read on every run, so the
-first use writes a ~100 MB SQLite index into the cache directory (`$JBMID_CACHE` →
+**The first run builds an index.** 1.5 GB of jsonlines is too much to read on every run, so the
+first use writes a ~150 MB SQLite index into the cache directory (`$JBMID_CACHE` →
 `~/.cache/jellyfin-bangumi-ids` → the system temp dir) in about twenty seconds; queries after
 that answer in milliseconds. The index is rebuilt automatically when the archive changes
 (size or mtime).
 
-**Measured on a 2122-episode library:**
+**Measured on a library of 2000-plus episodes:**
 
 | command | online API | offline (cold) | offline (warm) |
 | --- | --- | --- | --- |
@@ -137,7 +138,11 @@ jbmid scan --library Anime --limit 5          # try 5 shows first
 jbmid scan --library Anime --no-search        # trust existing IDs only, never search by title
 ```
 
-Anchor priority: **the series' own Bangumi ID → any season's Bangumi ID → search by title.**
+Anchor priority: **episode parents (each episode's own id points at its subject) → season id vote →
+the series' own Bangumi ID → search by title.** The earlier a step is, the stronger its evidence:
+an episode id belongs to exactly one subject, seasons are scraped one by one, and the series-level
+value is a single field that one bad match or one refresh can poison (that is how 物语系列 ended up
+on `2098`).
 
 Two guards, both required:
 
@@ -255,7 +260,7 @@ looking up the subject of the first couple of episodes in a season is more trust
 season-level metadata (frequently copied from a neighbouring entry). When a whole season's metadata
 failed to match, this is the fallback.
 
-### 6. `verify`: read-only health check
+### 6. `verify` — read-only health check
 
 ```bash
 jbmid verify --library Anime --out check.json
@@ -279,7 +284,10 @@ The offline run checks more, because order is more reliable than names:
 - `duplicate`: one bgm episode id used by two local episodes (usually a Season 0 special borrowing a TV id)
 - `disorder`: within one season the bgm `sort` values no longer walk `n, n+1, n+2…`
 - `foreign_subject`: the episode lives in another subject and is the only one doing so
+- `anchor_unknown`: the series-level id does not exist in the archive at all
 - `anchor_unused`: no episode uses the series-level id — how a stale anchor shows up
+
+The `anchors N` figure on the console line is `anchor_unknown` plus `anchor_unused`.
 - `duplicate_series`: the same show is registered twice (e.g. `/hdd` and `/strm`)
 
 
@@ -426,7 +434,7 @@ otherwise the show goes straight to `review` — no gambling.
 
 ### What alignment looks like
 
-All four writing modes (`scan` / `season` / `auto` / `special`) share one core idea: **align by
+All five writing modes (`scan` / `season` / `auto` / `special` / `anchor`) share one core idea: **align by
 episode title, not by episode number**.
 
 ```text
@@ -532,11 +540,12 @@ Two more shapes are recovered without a monotone chain:
 
 ```bash
 pip install -e .
-python -m unittest discover -s tests -v     # 21 tests, no network
+python -m unittest discover -s tests -v     # 66 tests, no network
 ```
 
 Tests cover title splitting, similarity, monotonic alignment, gap filling, scan decisions, special
-matching, library resolution, writing and rollback.
+matching, library resolution, writing and rollback, plus the later season alignment, offline archive
+index and anchor resolution order.
 
 > CI runs on every push / PR across Python 3.8 / 3.10 / 3.12;
 > the workflow lives at `.github/workflows/test.yml`.

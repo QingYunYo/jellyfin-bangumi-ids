@@ -61,8 +61,8 @@ export JF_API_KEY=你的key
 jbmid doctor
 ```
 
-`doctor` 会告诉你 Jellyfin 版本、库列表、bgm.tv 是否连通、插件配置状态。
-四项全绿再往下走。
+`doctor` 会告诉你 Jellyfin 版本、库列表、bgm.tv 是否连通、插件配置状态，
+以及离线档案有没有找到（`archive : …`，读不到时会提示用 `--archive DIR`）。全绿再往下走。
 
 ## 快速开始
 
@@ -91,7 +91,7 @@ jbmid rollback jbmid-backup.json
 
 Bangumi 插件自带一份离线数据库：在 Jellyfin 里跑一次「离线数据库更新」任务，它会把
 subject / episode / 人物档案下到 `{Jellyfin 数据目录}/bangumi/archive/`（Docker 里通常是
-`/config/data/bangumi/archive`，约 1.4 GB，两周左右更新一次）。
+`/config/data/bangumi/archive`，约 1.5 GB，两周左右更新一次）。
 
 本工具**默认就会用这份档案**，不需要额外配置：
 
@@ -104,11 +104,11 @@ jbmid scan --library 动漫 --no-archive                 # 强制只用在线 AP
 
 探测顺序：`--archive` → 环境变量 `JBMID_ARCHIVE` → Jellyfin `/System/Info` 里的 `DataPath`。
 
-**第一次会建索引**：1.4 GB 的 jsonlines 过大，不适合每次现读，所以首次运行会在缓存目录
-（`$JBMID_CACHE` → `~/.cache/jellyfin-bangumi-ids` → 系统临时目录）生成约 100 MB 的 SQLite
+**第一次会建索引**：1.5 GB 的 jsonlines 过大，不适合每次现读，所以首次运行会在缓存目录
+（`$JBMID_CACHE` → `~/.cache/jellyfin-bangumi-ids` → 系统临时目录）生成约 150 MB 的 SQLite
 索引，耗时 20 秒左右；之后每次查询在毫秒级。档案更新（文件大小或修改时间变化）后索引自动重建。
 
-**实测收益**（动漫库，2122 集）：
+**实测收益**（动漫库，2000 多集）：
 
 | 操作 | 在线 API | 离线档案（冷） | 离线档案（热） |
 | --- | --- | --- | --- |
@@ -129,7 +129,9 @@ jbmid scan --library 动漫 --limit 5          # 先试 5 部
 jbmid scan --library 动漫 --no-search        # 只信已有 ID，不按标题搜索
 ```
 
-锚点优先级：**剧集自己的 Bangumi ID → 某一季的 Bangumi ID → 按标题搜索**。
+锚点优先级：**集级反查（拿每集自己的 ID 反查上级条目）→ 季级 ID 多数票 → 剧集自己的 ID → 按标题搜索**。
+越靠前越可信：每集的 ID 只属于一个条目，季级是逐季刮的，剧集级只是一个字段——一次误匹配
+或一次刷新就能把它改坏（物语系列挂到 `2098` 就是这么来的）。
 
 两条守卫，缺一不可：
 
@@ -255,7 +257,10 @@ jbmid verify --library 动漫 --archive /path/to/bangumi/archive --out check.jso
 - `duplicate`：同一个 bgm 集 ID 被两集共用（多半是 Season 0 特别篇借了正片的 ID）
 - `disorder`：同一季里 ID 对应的 bgm `sort` 不是 `n, n+1, n+2…` 连续递增（错位/串条）
 - `foreign_subject`：这一集属于另一个 bgm 条目，且只有它一个（孤儿 ID）
+- `anchor_unknown`：剧集级 Bangumi ID 在档案里根本不存在（过期或写错）
 - `anchor_unused`：剧集级 Bangumi ID 没有任何一集在用——物语系列、凉宫的脏锚点就是这么查出来的
+
+终端那行 `anchors N` 是 `anchor_unknown` 与 `anchor_unused` 的合计。
 - `duplicate_series`：同一部剧在库里登记了两份（例如 `/hdd` 与 `/strm` 各一套）
 
 ### 7. `protect`：防止下次刷新把 ID 覆盖回去
@@ -385,7 +390,7 @@ Bangumi
 
 ### 对齐长什么样
 
-`scan` / `season` / `auto` / `special` 四种写入模式共用一个核心算法：**按集名对齐，而不是按集号**。
+`scan` / `season` / `auto` / `special` / `anchor` 五种写入模式共用一个核心算法：**按集名对齐，而不是按集号**。
 
 ```
 本地集名             Bangumi 集名
@@ -481,10 +486,11 @@ S01E05 - [Group] 白夜        ⟷  白夜            ✔ 1.00（先剥掉 [组�
 
 ```bash
 pip install -e .
-python -m unittest discover -s tests -v     # 21 个用例，不联网
+python -m unittest discover -s tests -v     # 66 个用例，不联网
 ```
 
-测试覆盖集名切分、相似度、单调对齐、空档补齐、扫描判定、番外匹配、库名解析、写入与回滚。
+测试覆盖集名切分、相似度、单调对齐、空档补齐、扫描判定、番外匹配、库名解析、写入与回滚，
+以及后加的季级对齐、离线档案索引、锚点取值顺序。
 
 > CI 在每次 push / PR 时自动跑，Python 3.8 / 3.10 / 3.12 三套矩阵，
 > 工作流见 `.github/workflows/test.yml`。

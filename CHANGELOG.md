@@ -19,7 +19,7 @@
 - `match.align_scores()`：把 `align()` 的保序 DP 抽出来，可以直接喂预先算好的相似度矩阵
   （季级对齐要对同一张矩阵复用窗口末端的补洞逻辑）。
 - 实测（动漫库 89 部，离线档案）：`scan` 83 ok / 6 review → **86 ok / 3 review**，`to_write 0`，
-  仅 3 部变化；清空全库重跑时为 81 ok / 8 review → 84 ok / 5 review。多库合计 124 部：
+  仅 3 部变化；清空全库重跑时为 81 ok / 8 review → 84 ok / 5 review。当时多库合计 124 部：
   `scan` 84 ok / 40 review → **87 ok / 37 review**，只有 3 部变化
   （命运之夜 无限剑制 25 集 vs 51 集池、心理测量者 41 vs 48、瑞克和莫蒂 70 vs 91 全部从
   `size mismatch` 转为 ok），**零退化**，`to_write 0`（映射与库里已有 ID 完全一致，不需要改任何东西）。
@@ -34,15 +34,15 @@
 - `match.normalize()` 保留假名并做 NFKC 折叠：纯片假名标题不再归一化成空串，
   全角 `８６` 与半角 `86` 等价。
 - 新增 `verify --archive DIR`：直接读 Bangumi 插件的离线库（`*.jsonlines`），
-  不占 API 配额，整库 2000 集约 15 秒（在线版要 40 分钟且会被限流打断）。
+  不占 API 配额，整库 2000 多集约 18 秒（在线版要 40 分钟且会被限流打断）。
   除集名相似度外新增四项基于顺序与归属的检查：`duplicate`（同一 ID 被两集共用）、
   `disorder`（同一季的 bgm `sort` 不连续）、`foreign_subject`（孤儿条目）、
   `anchor_unused`（剧集级 ID 无人使用），以及 `duplicate_series`（同一部剧在库里登记两份）。
   比对前先洗掉 `S01E01 - [组名]` 这类文件名噪声。
 - **离线档案提速，默认启用**：`scan` / `special` / `season` / `auto` / `verify` 会先找
   Bangumi 插件的本地档案（`--archive` → `JBMID_ARCHIVE` → Jellyfin `/System/Info` 的 `DataPath`），
-  找到就整库走本地；首次运行把 1.4 GB jsonlines 建成 SQLite 索引（约 20 秒，缓存在
-  `$JBMID_CACHE` / `~/.cache` / 临时目录），之后集数查询毫秒级。实测 2122 集：verify 40 分钟 →
+  找到就整库走本地；首次运行把 1.5 GB jsonlines 建成 SQLite 索引（约 20 秒，缓存在
+  `$JBMID_CACHE` / `~/.cache` / 临时目录），之后集数查询毫秒级。实测 2000 多集：verify 40 分钟 →
   18 秒，scan 12 分钟 → 冷启动 2.5 分钟 / 热启动 19 秒。`--no-archive` 可强制走在线 API。
 - 离线库没有「续集/前传」关系和标题搜索：这两类请求第一次仍走 API，并写入索引缓存；
   档案里查不到的条目（新番、新条目）自动回落 API，结果与纯在线模式一致（回归对比

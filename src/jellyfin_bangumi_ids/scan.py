@@ -168,11 +168,13 @@ def search_anchor(bgm, series: Dict[str, Any], local_total: Optional[int] = None
 
 def pick_anchor(bgm, jf, series: Dict[str, Any], allow_search: bool = True
                 ) -> Tuple[Optional[int], str, List[str]]:
-    """Episode parents -> season ids -> series id -> title search.
+    """Episode parents -> season votes -> series id -> title search.
 
     Episode ids are the strongest evidence: each one belongs to exactly one subject,
     so a vote over a couple of episodes per season cannot be fooled by stale season
-    metadata the way a copied ``ProviderIds`` value can.
+    metadata the way a copied ``ProviderIds`` value can.  Season votes come next for
+    the same reason: they are scraped per season, while the series-level value is a
+    single field that one bad match or one refresh can poison for good.
     """
     notes: List[str] = []
     if allow_search:
@@ -181,14 +183,14 @@ def pick_anchor(bgm, jf, series: Dict[str, Any], allow_search: bool = True
             return parent, "episode-parent", notes
         if parent:
             notes.append("ignored implausible episode parent %s" % parent)
-    sid, how = series_anchor(series)
+    sid, how = season_anchor(bgm, jf, series)
     if sid and not anchor_plausible(bgm, series, sid):
-        notes.append("ignored implausible series id %s" % sid)
+        notes.append("ignored implausible season id %s" % sid)
         sid, how = None, "none"
     if not sid:
-        sid, how = season_anchor(bgm, jf, series)
+        sid, how = series_anchor(series)
         if sid and not anchor_plausible(bgm, series, sid):
-            notes.append("ignored implausible season id %s" % sid)
+            notes.append("ignored implausible series id %s" % sid)
             sid, how = None, "none"
     if not sid and allow_search:
         local, _skipped = collect_local_episodes(jf, series)

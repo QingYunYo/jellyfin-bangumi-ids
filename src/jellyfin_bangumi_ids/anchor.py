@@ -10,11 +10,15 @@ from __future__ import annotations
 import json
 from typing import Any, Dict, Optional, Tuple
 
-from .scan import collect_local_episodes, anchor_plausible, log, season_anchor, series_anchor, title_keys
+from .scan import (anchor_plausible, collect_local_episodes, episode_parent_vote, log,
+                   season_anchor, series_anchor, title_keys)
 
 
 def derive_anchor(bgm, jf, series: Dict[str, Any]) -> Tuple[Optional[int], str]:
-    """Seasons first, then the series id, then a title search."""
+    """Episode parents, then season votes, then the series id, then a title search."""
+    parent = episode_parent_vote(bgm, jf, series)
+    if parent and anchor_plausible(bgm, series, parent):
+        return parent, "episode-parent"
     sid, how = season_anchor(bgm, jf, series)
     if sid:
         return sid, how
