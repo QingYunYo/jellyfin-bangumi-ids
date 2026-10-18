@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "jellyfin-bangumi-ids"
-version = "1.0.0"
+version = "1.1.0"
 description = "修好 Jellyfin 里 Bangumi 插件的集 ID：批量扫描、按季映射、全库校验，只依赖标准库。"
 readme = "README.md"
 requires-python = ">=3.8"

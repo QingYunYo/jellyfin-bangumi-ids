@@ -32,6 +32,7 @@ Jellyfin 的每一集都有一个 `ProviderIds.Bangumi`，Bangumi 插件上报�
 | `scan` | 大部分番是干净的，只有零星几部不对 | `jbmid scan` → `jbmid apply` |
 | `season` | Bangumi 的季划分和你的文件夹完全对不上，需要你指定 | `jbmid season --map map.json` |
 | `auto` | 想一把梭，让工具自己按标题找条目、按集名对齐 | `jbmid auto` |
+| `special` | 番外 / SP / OVA / 总集篇 也想同步 | `jbmid special` → `jbmid apply` |
 | `verify` | 修完（或修前）想看看哪些 ID 是坏的，**只读不写** | `jbmid verify` |
 
 `scan` / `season` / `auto` 三种写入模式共用一个核心算法：**按集名对齐，而不是按集号**。
@@ -157,7 +158,25 @@ jbmid auto --library 动漫 --backup jbmid-backup-auto.json
 退化成顺序映射并标记 `order-low-confidence`——这条路能吃下「集名是纯日文/纯英文
 文件名」的库（比如 `S01E01 - [CASO&DMG] ...`）。
 
-### 4. `verify`：只读体检
+### 4. `special`：连番外一起修
+
+正片 ID 都在 Season ≥ 1 里，番外一般挂在 Season 0。前面几种模式都会**跳过**它们，
+所以番外永远同步不到 Bangumi。`special` 专门补这一块：
+
+```bash
+jbmid special --library 动漫 --out specials.json
+jbmid apply specials.json --dry-run
+jbmid apply specials.json --backup specials-backup.json
+```
+
+它从同一个锚点拉整条链，把每个条目的 `type=1`（SP/OVA/总集篇）拼成一个池子，
+再用集名和你的 Season 0 / 集名带 `OVA|SP|番外|总集篇` 的集对齐。
+
+- 名字能对上才写（相似度 ≥ 0.55），对不上的留给人工——不会为了「凑数」硬写。
+- 整条链上只有一两个 SP、且数量正好对上时，走顺序映射，但仍要求最低相似度 0.25。
+- 输出和 `scan` 完全同构，所以还是用 `apply` / `rollback`，备份照旧。
+
+### 5. `verify`：只读体检
 
 ```bash
 jbmid verify --library 动漫 --out check.json
@@ -167,7 +186,7 @@ jbmid verify --library 动漫 --out check.json
 相似度低于阈值的全列出来——注意这**不等于错了**：文件名式集名、
 纯翻译差异、英文名条目都会误报，需要人眼扫一遍。
 
-### 5. `protect`：防止下次刷新把 ID 覆盖回去
+### 6. `protect`：防止下次刷新把 ID 覆盖回去
 
 ```bash
 jbmid protect

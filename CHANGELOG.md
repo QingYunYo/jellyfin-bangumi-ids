@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.1.0
+
+- 新增 `special` 子命令：把番外 / SP / OVA / 总集篇 也对上 Bangumi 的 `type=1` 集
+  （输出与 `scan` 同构，复用 `apply` / `rollback`）。
+
 ## 1.0.0
 
 首个公开版本。

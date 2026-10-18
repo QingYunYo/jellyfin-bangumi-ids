@@ -5,7 +5,7 @@ import json
 import sys
 from typing import Any, Dict, List, Optional, Tuple
 
-from .match import align, fill_gaps, is_special, name_match, similarity
+from .match import align, episode_similarity, fill_gaps, is_special, name_match, similarity
 
 OK, REVIEW = "ok", "review"
 
@@ -182,6 +182,127 @@ def scan_series(jf, bgm, series: Dict[str, Any], allow_search: bool = True,
         entry["status"] = OK
         entry["to_write"] = sum(1 for e in episodes if e["change"])
     return entry
+
+
+def build_special_pool(bgm, chain: List[int]) -> List[Dict[str, Any]]:
+    """All ``type=1`` (SP/OVA) episodes of the chain, in chain order."""
+    pool: List[Dict[str, Any]] = []
+    for sid in chain:
+        for ep in bgm.episodes(sid, 1):
+            if ep.get("name") or ep.get("name_cn"):
+                pool.append(ep)
+    return pool
+
+
+def collect_local_specials(jf, series: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """Season-0 episodes plus any in-season episode whose name looks like a special."""
+    out: List[Dict[str, Any]] = []
+    for season in jf.seasons(series["Id"]):
+        s_idx = season.get("IndexNumber") or 0
+        for ep in jf.season_episodes(season["Id"]):
+            name = ep.get("Name") or ""
+            if s_idx == 0 or is_special(name):
+                out.append({"season": s_idx, "index": ep.get("IndexNumber"),
+                            "name": name, "old": (ep.get("ProviderIds") or {}).get("Bangumi"),
+                            "item": ep})
+    return out
+
+
+def scan_specials(jf, bgm, series: Dict[str, Any], min_sim: float = 0.55) -> Dict[str, Any]:
+    """Match local SP/OVA episodes against the chain's ``type=1`` episodes."""
+    name = series.get("Name") or ""
+    entry: Dict[str, Any] = {"series": name, "series_id": series["Id"], "status": "review",
+                             "reason": "", "episodes": [], "to_write": 0, "chain": []}
+    anchor, how = series_anchor(series)
+    if not anchor:
+        anchor, how = season_anchor(bgm, jf, series)
+    if not anchor:
+        anchor, how, _notes = search_anchor(bgm, series)
+    if not anchor:
+        entry["reason"] = "no Bangumi anchor"
+        return entry
+    entry["anchor"], entry["anchor_how"] = anchor, how
+    chain = bgm.chain(anchor)
+    entry["chain"] = chain
+    pool = build_special_pool(bgm, chain)
+    if not pool:
+        entry["reason"] = "Bangumi 上没有该剧的 SP/OVA 条目"
+        return entry
+    locals_ = collect_local_specials(jf, series)
+    if not locals_:
+        entry["reason"] = "库里没有番外集"
+        return entry
+
+    local_names = [x["name"] for x in locals_]
+    positional = False
+    if len(pool) == len(locals_) and len(pool) <= 3:
+        # 整条链上就几个 SP，且数量正好对上——顺序映射；但仍要有个最低相似度兜底
+        pairs = [(i, i, episode_similarity(local_names[i], pool[i])) for i in range(len(pool))]
+        pairs = [p for p in pairs if p[2] >= 0.25]
+        positional = True
+        entry["notes"] = ["positional"]
+    else:
+        pairs = align(local_names, pool, threshold=0.45)
+        pairs = [(i, j, episode_similarity(local_names[i], pool[j])) for i, j in pairs]
+        pairs = [p for p in pairs if p[2] >= min_sim]
+
+    matched = len(pairs)
+    mean = round(sum(p[2] for p in pairs) / matched, 2) if matched else 0.0
+    entry["pool"] = len(pool)
+    entry["local"] = len(locals_)
+    entry["matched"] = matched
+    entry["mean_sim"] = mean
+    entry["coverage"] = round(matched / float(len(locals_)), 2)
+    for i, j, sc in pairs:
+        item = locals_[i]
+        new = str(pool[j]["id"])
+        entry["episodes"].append({
+            "season": item["season"], "index": item["index"], "name": item["name"],
+            "old": item["old"], "bgm_id": new, "bgm_name": pool[j].get("name_cn") or pool[j].get("name"),
+            "sim": round(sc, 2), "change": str(item["old"] or "") != new, "item_id": item["item"]["Id"],
+        })
+    entry["to_write"] = sum(1 for e in entry["episodes"] if e["change"])
+    if matched == 0:
+        entry["reason"] = "没有一集达到相似度门槛"
+    elif positional and matched == len(pool):
+        entry["status"] = OK
+    elif mean < min_sim:
+        entry["reason"] = "weak match: mean sim %.2f" % mean
+    else:
+        entry["status"] = "ok"
+    return entry
+
+
+def run_specials(jf, bgm, library=None, limit=None, verbose=False,
+                 out: str = "jbmid-specials.json") -> Dict[str, Any]:
+    series_list = jf.all_series(library_name=library)
+    if limit:
+        series_list = series_list[:limit]
+    report: Dict[str, Any] = {"library": library, "mode": "special", "series": []}
+    for i, series in enumerate(series_list, 1):
+        try:
+            entry = scan_specials(jf, bgm, series)
+        except Exception as exc:  # noqa: BLE001 - one bad series must not kill the run
+            entry = {"series": series.get("Name"), "series_id": series.get("Id"),
+                     "status": "review", "reason": "error: %s" % exc, "episodes": [],
+                     "to_write": 0}
+        report["series"].append(entry)
+        if verbose and (entry["status"] == OK or entry.get("matched")):
+            print("[%d/%d] %-7s %-28s %s" % (i, len(series_list), entry["status"].upper(),
+                                             (entry["series"] or "")[:28], entry.get("reason") or
+                                             "match %d/%d sim %.2f" % (entry.get("matched", 0),
+                                                                      entry.get("local", 0),
+                                                                      entry.get("mean_sim", 0))))
+    ok = [e for e in report["series"] if e["status"] == OK]
+    report["summary"] = {
+        "series_ok": len(ok),
+        "series_review": len(report["series"]) - len(ok),
+        "episodes_to_write": sum(e.get("to_write", 0) for e in ok),
+        "specials_matched": sum(e.get("matched", 0) for e in report["series"]),
+    }
+    with open(out, "w", encoding="utf-8") as fh:
+        json.dump(report, fh, ensure_ascii=False, indent=1)
+    return report
 
 
 def run_scan(jf, bgm, library: Optional[str] = None, limit: Optional[int] = None,

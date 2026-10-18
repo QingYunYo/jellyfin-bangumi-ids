@@ -3,14 +3,16 @@ import os
 import tempfile
 import unittest
 
-from jellyfin_bangumi_ids.scan import REVIEW, OK, apply_report, rollback, scan_series
+from jellyfin_bangumi_ids.scan import (REVIEW, OK, apply_report, rollback, scan_series,
+                                       scan_specials)
 
 
 class FakeBgm:
     """Network-free Bangumi stand-in."""
 
-    def __init__(self, subjects):
+    def __init__(self, subjects, specials=None):
         self.subjects = subjects          # {subject_id: [episode dicts]}
+        self.specials = specials or {}    # {subject_id: [type=1 episode dicts]}
         self.links = {1671: [1672]}       # subject -> sequels
 
     def subject(self, sid):
@@ -28,7 +30,7 @@ class FakeBgm:
 
     def episodes(self, sid, ep_type=0):
         if ep_type:
-            return []
+            return list(self.specials.get(sid, []))
         return self.subjects.get(sid, [])
 
     def episode_list(self, sid):
@@ -108,3 +110,35 @@ class ScanTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class SpecialsTest(unittest.TestCase):
+    def _series(self):
+        return {"Id": "series1", "Name": "测试番", "ProviderIds": {"Bangumi": "1671"}}
+
+    def test_specials_match_by_name(self):
+        bgm = FakeBgm({1671: [{"id": 1, "sort": 1, "name_cn": "第一集"}]},
+                      specials={1671: [{"id": 900, "sort": 1, "name_cn": "番外篇 艾莉丝的哥布林讨伐"},
+                                       {"id": 901, "sort": 2, "name_cn": "特别篇 守墓人与猫与魔术师"}]})
+        jf = FakeJf(self._series(), [
+            (0, [("sp1", "番外篇「艾莉丝的哥布林讨伐」")]),
+            (1, [("e1", "第一集")]),
+        ])
+        entry = scan_specials(jf, bgm, self._series())
+        self.assertEqual(entry["status"], OK)
+        self.assertEqual(entry["matched"], 1)
+        self.assertEqual(entry["episodes"][0]["bgm_id"], "900")
+
+    def test_no_specials_on_bangumi_goes_to_review(self):
+        bgm = FakeBgm({1671: [{"id": 1, "sort": 1, "name_cn": "第一集"}]})
+        jf = FakeJf(self._series(), [(0, [("sp1", "番外篇 艾莉丝的哥布林讨伐")])])
+        entry = scan_specials(jf, bgm, self._series())
+        self.assertEqual(entry["status"], REVIEW)
+        self.assertEqual(entry["to_write"], 0)
+
+    def test_unmatched_special_is_not_written(self):
+        bgm = FakeBgm({1671: []}, specials={1671: [{"id": 900, "sort": 1, "name_cn": "完全无关的东西"}]})
+        jf = FakeJf(self._series(), [(0, [("sp1", "番外篇 艾莉丝的哥布林讨伐")])])
+        entry = scan_specials(jf, bgm, self._series())
+        self.assertEqual(entry["status"], REVIEW)
+        self.assertEqual(entry["to_write"], 0)

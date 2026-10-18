@@ -12,7 +12,7 @@ from . import __version__
 from .auto import scan_auto
 from .bangumi import Bangumi
 from .jellyfin import Jellyfin
-from .scan import apply_report, log, rollback, run_scan
+from .scan import apply_report, log, rollback, run_scan, run_specials
 from .season import load_mapping, scan_seasons
 from .transport import force_ipv4
 from .verify import run_verify
@@ -52,6 +52,22 @@ def cmd_scan(args: argparse.Namespace) -> int:
     print("report         : %s" % args.out)
     if summary["episodes_to_write"]:
         print("next           : jbmid apply %s --backup jbmid-backup.json" % args.out)
+    return 0
+
+
+def cmd_special(args: argparse.Namespace) -> int:
+    jf, bgm = clients(args)
+    report = run_specials(jf, bgm, library=args.library, limit=args.limit,
+                          verbose=True, out=args.out)
+    summary = report["summary"]
+    print("")
+    print("series ok      : %d" % summary["series_ok"])
+    print("series review  : %d" % summary["series_review"])
+    print("specials       : %d matched" % summary["specials_matched"])
+    print("episodes       : %d to write" % summary["episodes_to_write"])
+    print("report         : %s" % args.out)
+    if summary["episodes_to_write"]:
+        print("next           : jbmid apply %s --backup jbmid-backup-sp.json" % args.out)
     return 0
 
 
@@ -150,6 +166,13 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--no-search", action="store_true", help="do not search bgm by title")
     p.add_argument("--out", default="jbmid-report.json")
     p.set_defaults(func=cmd_scan)
+
+    p = sub.add_parser("special", help="match SP/OVA episodes too (type=1 on Bangumi)")
+    common(p)
+    p.add_argument("--library", help="library name, e.g. 动漫")
+    p.add_argument("--limit", type=int)
+    p.add_argument("--out", default="jbmid-specials.json")
+    p.set_defaults(func=cmd_special)
 
     p = sub.add_parser("apply", help="write the ids from a scan report")
     common(p)
