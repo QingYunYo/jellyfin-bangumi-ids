@@ -352,6 +352,10 @@ python -m unittest discover -s tests -v     # 16 个用例，不联网
 
 测试覆盖集名切分、相似度、单调对齐、空档补齐、扫描判定、番外匹配、写入与回滚。
 
+> **CI 默认关闭。** GitHub 只允许带 `workflow` scope 的 token 推送 `.github/workflows/`，
+> 所以工作流模板放在 `docs/ci/test.yml`。想启用：在仓库网页新建文件
+> `.github/workflows/test.yml`，把模板内容贴进去即可（网页操作不需要 token）。
+
 ### 发布新版本
 
 ```bash
