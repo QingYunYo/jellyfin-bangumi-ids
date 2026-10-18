@@ -12,6 +12,7 @@ from . import __version__
 from .auto import scan_auto
 from .bangumi import Bangumi
 from .jellyfin import Jellyfin
+from .offline import ArchiveIndex, OfflineBangumi, find_archive
 from .scan import apply_report, log, rollback, run_scan, run_specials
 from .season import load_mapping, scan_seasons
 from .transport import force_ipv4
@@ -27,6 +28,10 @@ def common(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--ipv4", action="store_true",
                         help="force IPv4 lookups (fixes 20 s hangs on hosts with broken IPv6)")
     parser.add_argument("--timeout", type=float, default=20.0)
+    parser.add_argument("--archive", metavar="DIR",
+                        help="Bangumi plugin archive directory (default: auto-detect, env JBMID_ARCHIVE)")
+    parser.add_argument("--no-archive", action="store_true",
+                        help="ignore the offline archive and always call api.bgm.tv")
     parser.add_argument("-v", "--verbose", action="store_true")
 
 
@@ -40,8 +45,29 @@ def clients(args: argparse.Namespace):
     return jf, bgm
 
 
-def cmd_scan(args: argparse.Namespace) -> int:
+def data_source(args: argparse.Namespace, jf) -> Optional[str]:
+    """Resolved archive directory, or None when the online API is in charge."""
+    if getattr(args, "no_archive", False):
+        return None
+    return find_archive(jf, getattr(args, "archive", None))
+
+
+def clients_with_source(args: argparse.Namespace):
     jf, bgm = clients(args)
+    archive = data_source(args, jf)
+    if archive:
+        index = ArchiveIndex(archive, verbose=True)
+        bgm = OfflineBangumi(index, bgm, label=archive)
+        print("data source    : %s" % bgm.describe(), file=sys.stderr)
+    else:
+        why = "--no-archive" if getattr(args, "no_archive", False) else \
+            "no offline archive found; pass --archive DIR"
+        print("data source    : api.bgm.tv (%s)" % why, file=sys.stderr)
+    return jf, bgm
+
+
+def cmd_scan(args: argparse.Namespace) -> int:
+    jf, bgm = clients_with_source(args)
     report = run_scan(jf, bgm, library=args.library, limit=args.limit,
                       allow_search=not args.no_search, threshold=args.threshold, out=args.out)
     summary = report["summary"]
@@ -56,7 +82,7 @@ def cmd_scan(args: argparse.Namespace) -> int:
 
 
 def cmd_special(args: argparse.Namespace) -> int:
-    jf, bgm = clients(args)
+    jf, bgm = clients_with_source(args)
     report = run_specials(jf, bgm, library=args.library, limit=args.limit,
                           verbose=True, out=args.out)
     summary = report["summary"]
@@ -72,7 +98,7 @@ def cmd_special(args: argparse.Namespace) -> int:
 
 
 def cmd_apply(args: argparse.Namespace) -> int:
-    jf, _ = clients(args)
+    jf, _ = clients_with_source(args)
     with open(args.report, encoding="utf-8") as fh:
         report = json.load(fh)
     apply_report(jf, report, backup_path=None if args.no_backup else args.backup,
@@ -81,7 +107,7 @@ def cmd_apply(args: argparse.Namespace) -> int:
 
 
 def cmd_season(args: argparse.Namespace) -> int:
-    jf, bgm = clients(args)
+    jf, bgm = clients_with_source(args)
     mapping = load_mapping(args.map)
     entries = scan_seasons(jf, bgm, mapping, threshold=args.threshold)
     ok = [e for e in entries if e["status"] == "ok"]
@@ -96,7 +122,7 @@ def cmd_season(args: argparse.Namespace) -> int:
 
 
 def cmd_auto(args: argparse.Namespace) -> int:
-    jf, bgm = clients(args)
+    jf, bgm = clients_with_source(args)
     entries = scan_auto(jf, bgm, library=args.library, only=args.only,
                         threshold=args.threshold, limit=args.limit)
     ok = [e for e in entries if e["status"] == "ok"]
@@ -110,14 +136,18 @@ def cmd_auto(args: argparse.Namespace) -> int:
 
 
 def cmd_verify(args: argparse.Namespace) -> int:
-    if getattr(args, "archive", None):
-        jf, _ = clients(args)
-        report = run_verify_offline(jf, args.archive, library=args.library, limit=args.limit,
-                                    threshold=args.threshold, out=args.out)
-        return 0 if report["checked"] else 1
     jf, bgm = clients(args)
-    report = run_verify(jf, bgm, library=args.library, limit=args.limit,
-                        threshold=args.threshold, out=args.out)
+    archive = data_source(args, jf)
+    if archive:
+        print("data source    : offline archive %s" % archive, file=sys.stderr)
+        report = run_verify_offline(jf, archive, library=args.library, limit=args.limit,
+                                    threshold=args.threshold, out=args.out)
+    else:
+        why = "--no-archive" if getattr(args, "no_archive", False) else \
+            "no offline archive found; pass --archive DIR"
+        print("data source    : api.bgm.tv (%s)" % why, file=sys.stderr)
+        report = run_verify(jf, bgm, library=args.library, limit=args.limit,
+                            threshold=args.threshold, out=args.out)
     return 0 if report["checked"] else 1
 
 
@@ -135,9 +165,20 @@ def cmd_protect(args: argparse.Namespace) -> int:
 
 
 def cmd_doctor(args: argparse.Namespace) -> int:
-    jf, bgm = clients(args)
+    jf, bgm = clients_with_source(args)
     info = jf.get("/System/Info") or {}
     print("jellyfin  : %s (%s)" % (info.get("Version"), args.url))
+    archive = data_source(args, jf)
+    if archive:
+        try:
+            index = ArchiveIndex(archive, verbose=False)
+            counts = index.counts()
+            print("archive   : %s (%d subjects, %d episodes)" % (
+                archive, counts["subjects"], counts["episodes"]))
+        except Exception as exc:
+            print("archive   : %s (unreadable: %s)" % (archive, exc))
+    else:
+        print("archive   : none (online only)")
     libs = jf.libraries()
     print("libraries : %d (%s)" % (len(libs), ", ".join(libs)) if libs else "libraries : none")
     start = time.time()
@@ -210,8 +251,6 @@ def build_parser() -> argparse.ArgumentParser:
 
     p = sub.add_parser("verify", help="read-only check of every stored id")
     common(p)
-    p.add_argument("--archive", metavar="DIR",
-                   help="answer from the plugin's offline archive (*.jsonlines) instead of the API")
     p.add_argument("--library")
     p.add_argument("--limit", type=int)
     p.add_argument("--threshold", type=float, default=0.45)

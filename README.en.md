@@ -91,6 +91,41 @@ jbmid rollback jbmid-backup.json
 > title. That is why it handles "one show split into several subjects" natively — as long as the
 > chain's total episode count matches your library.
 
+## Speed it up with the offline archive
+
+The Bangumi plugin ships a local database: run its "update offline database" task once and it
+downloads subject / episode / person dumps into `{Jellyfin data dir}/bangumi/archive/`
+(`/config/data/bangumi/archive` in Docker, about 1.4 GB, refreshed every couple of weeks).
+
+This tool **uses that archive by default** — no extra setup:
+
+```bash
+jbmid scan --library Anime                       # auto-detects the archive
+jbmid verify --library Anime                     # offline check as well
+jbmid scan --library Anime --archive /path/to/archive   # archive lives elsewhere
+jbmid scan --library Anime --no-archive                 # force the online API
+```
+
+Resolution order: `--archive` → `JBMID_ARCHIVE` → `DataPath` from Jellyfin's `/System/Info`.
+
+**The first run builds an index.** 1.4 GB of jsonlines is too much to read on every run, so the
+first use writes a ~100 MB SQLite index into the cache directory (`$JBMID_CACHE` →
+`~/.cache/jellyfin-bangumi-ids` → the system temp dir) in about twenty seconds; queries after
+that answer in milliseconds. The index is rebuilt automatically when the archive changes
+(size or mtime).
+
+**Measured on a 2122-episode library:**
+
+| command | online API | offline (cold) | offline (warm) |
+| --- | --- | --- | --- |
+| `verify` | 40 min (and rate-limited) | 18 s | 18 s |
+| `scan` | ~12 min | 2.5 min | 19 s |
+
+Sequel/prequel relations and title search are not in the archive: the first run still calls the
+API for those and caches the answers inside the index, which is why the cold run pays for the
+relation graph once. The archive is older than the live database, so ids it does not know
+(new shows, freshly created subjects) fall back to the API — nothing gets missed.
+
 ## Modes in detail
 
 ### 1. `scan` — find anchors automatically

@@ -86,6 +86,38 @@ jbmid rollback jbmid-backup.json
 > 再用链上所有正片的集名和你的库对齐。所以它天然能处理「一部番被拆成多个条目」
 > 的情况——只要整条链的总集数和你的库对得上。
 
+## 用离线库提速（推荐）
+
+Bangumi 插件自带一份离线数据库：在 Jellyfin 里跑一次「离线数据库更新」任务，它会把
+subject / episode / 人物档案下到 `{Jellyfin 数据目录}/bangumi/archive/`（Docker 里通常是
+`/config/data/bangumi/archive`，约 1.4 GB，两周左右更新一次）。
+
+本工具**默认就会用这份档案**，不需要额外配置：
+
+```bash
+jbmid scan --library 动漫            # 自动探测档案，找到就用
+jbmid verify --library 动漫          # 同样自动走离线版
+jbmid scan --library 动漫 --archive /path/to/archive   # 档案不在默认位置时手动指定
+jbmid scan --library 动漫 --no-archive                 # 强制只用在线 API
+```
+
+探测顺序：`--archive` → 环境变量 `JBMID_ARCHIVE` → Jellyfin `/System/Info` 里的 `DataPath`。
+
+**第一次会建索引**：1.4 GB 的 jsonlines 过大，不适合每次现读，所以首次运行会在缓存目录
+（`$JBMID_CACHE` → `~/.cache/jellyfin-bangumi-ids` → 系统临时目录）生成约 100 MB 的 SQLite
+索引，耗时 20 秒左右；之后每次查询在毫秒级。档案更新（文件大小或修改时间变化）后索引自动重建。
+
+**实测收益**（动漫库，2122 集）：
+
+| 操作 | 在线 API | 离线档案（冷） | 离线档案（热） |
+| --- | --- | --- | --- |
+| `verify` | 40 分钟（还会被限流打断） | 18 秒 | 18 秒 |
+| `scan` | 约 12 分钟 | 2 分半 | 19 秒 |
+
+离线库里没有「续集/前传」关系和标题搜索，这两项第一次仍会调用 API，并缓存进索引——
+所以冷启动要拉一遍关系图，第二次开始才是纯离线。档案比线上旧，里面查不到的条目
+（新番、刚建的新条目）会自动回落到 API，不会漏掉。
+
 ## 模式详解
 
 ### 1. `scan`：自动找锚点
