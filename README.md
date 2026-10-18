@@ -25,7 +25,7 @@
 Jellyfin 的每一集都有一个 `ProviderIds.Bangumi`，Bangumi 插件上报进度时只认这个数字。
 本工具负责把这个数字填对，**并且只填这一个字段**。
 
-四种模式，按你库的混乱程度选：
+五种模式，按你库的混乱程度选：
 
 | 模式 | 何时用 | 命令 |
 | --- | --- | --- |
@@ -35,7 +35,7 @@ Jellyfin 的每一集都有一个 `ProviderIds.Bangumi`，Bangumi 插件上报�
 | `special` | 番外 / SP / OVA / 总集篇 也想同步 | `jbmid special` → `jbmid apply` |
 | `verify` | 修完（或修前）想看看哪些 ID 是坏的，**只读不写** | `jbmid verify` |
 
-`scan` / `season` / `auto` 三种写入模式共用一个核心算法：**按集名对齐，而不是按集号**。
+`scan` / `season` / `auto` / `special` 四种写入模式共用一个核心算法：**按集名对齐，而不是按集号**。
 
 ```
 本地集名             Bangumi 集名
@@ -53,6 +53,118 @@ S01E05 - [Group] 白夜        ⟷  白夜            ✔ 1.00（先剥掉 [组�
 
 **什么时候才会写**：两侧集数相等，或（集数规模接近 + 命中率 ≥ 90% + 平均相似度 ≥ 0.55）。
 任何一条不满足，该番进 `review`，一条都不会改。
+
+## 数据从哪来
+
+只用三个来源，都不需要额外装东西：
+
+| 来源 | 取什么 | 地址 |
+| --- | --- | --- |
+| 你的 Jellyfin | 库 / 剧 / 季 / 集，每集的 `Name` 与 `ProviderIds.Bangumi` | 你自己的 `:8096` |
+| Bangumi 公开 API | 条目关系、正片集、番外集、集名 | `https://api.bgm.tv/v0`（匿名可读，不要 token） |
+| 库里已有的 Bangumi ID | 当锚点，定位「这部剧是哪个条目」 | 从 Jellyfin 读 |
+
+实际用到的接口：
+
+```text
+Jellyfin
+  GET  /Library/MediaFolders                                      → 库名 → 库 ID
+  GET  /Items?IncludeItemTypes=Series&Recursive                   → 全库剧集（带 ProviderIds）
+  GET  /Shows/{seriesId}/Seasons                                  → 季
+  GET  /Items?ParentId={seasonId}&IncludeItemTypes=Episode&Recursive=true
+                                                                  → 每季的集（带 ProviderIds）
+  GET  /Items/{itemId}?userId={uid}&Fields=ProviderIds,Path       → 单集完整 DTO
+  POST /Items/{itemId}                                            → 回写
+
+Bangumi
+  GET  /v0/subjects/{id}/subjects                                 → 续集 / 前传 关系
+  GET  /v0/episodes?subject_id={id}&type=0                        → 正片
+  GET  /v0/episodes?subject_id={id}&type=1                        → SP / OVA
+  POST /v0/search/subjects                                        → 按标题找条目
+  GET  /v0/episodes/{id}                                          → 单集详情
+```
+
+两点容易误会的地方：
+
+- **不读 TMDB / TVDB 的数据。** 它们只是你刮削的来源，工具看到的是刮削结果落在 Jellyfin
+  里的那个集名。所以「TMDB 一季、Bangumi 拆两个条目」这种错位，是在**集名**层面解决的，
+  不需要知道你用的是哪个刮削源。
+- **`sort` 不一定是整数。** Bangumi 的集号可以是 `8.5`、`16.5`（SP 插在正片中间），
+  排序按浮点做，不做四舍五入。
+
+## 处理流程
+
+```text
+① 找锚点     剧的 ID → 某一季的 ID → 按剧名搜索
+② 拉链       从锚点沿「续集」向后、「前传」向前，去重
+③ 建池       链上每个条目取 type=0，丢掉空名，按 sort 排序
+④ 对齐       分段 → 变体切分 → 相似度 → 单调最优匹配 → 空档补齐
+⑤ 判定       集数相等，或（规模相近 + 命中率 ≥ 90% + 平均相似度 ≥ 0.55）
+⑥ 写回       GET 完整 DTO → 只改一个字段 → POST → 再 GET 回读比对
+```
+
+**① 锚点**是最便宜也最可靠的信号；一个都没有时才按标题搜索，且搜索结果必须过标题守卫
+（归一化后互相包含），否则直接 `review`，不赌。
+
+**④ 对齐**里几个细节：
+
+- *分段*：本地季数 == 链上条目数时，每季只和自己那个条目对齐，避免跨季位移。
+- *变体切分*：`S01E18 - [Group] 白夜`、`进击的巨人 - S03E18 - 白夜`、`「…」『…』`、
+  `A／B` 都会拆出候选标题，再和 `name_cn` / `name` 逐个比。
+- *单调*：动态规划求保序的最大总分，不允许第 5 集配到第 3 集。
+- *补齐*：两侧剩余空档数量相等时按 1:1 补，处理 `觉悟` ↔ `決心` 这种零相似度但位置确定的翻译差异。
+
+**⑥ 写回**只动 `ProviderIds.Bangumi` 一个键，写完回读，并检查
+`Name / Overview / PremiereDate / Imdb / Tmdb / Tvdb` 有没有被误伤（`collateral`）。
+
+## 通用性：换一个人的库还能用吗
+
+**代码里没有任何「某个人的库」**
+
+- 零硬编码：没有写死任何 subject id、剧名或集数。唯一的固定常量是 Bangumi 插件的 GUID
+  `41b59f1b-a6cf-474a-b416-785379cbd856`，那是插件作者定的，只在 `protect` 里用来改
+  `TrustExistedBangumiId`。
+- 没有 Bangumi ID 的库也能跑（走标题搜索）；既没有 ID、标题也搜不到时，明确报
+  `no Bangumi anchor`，不会乱猜。
+
+**算法对「别人家的库」的防御**
+
+| 你的库可能长这样 | 工具的处理 |
+| --- | --- |
+| 集名是文件名 `S01E01 - [CASO&DMG] 夏の…` | 变体切分剥掉组名和 `SxxExx` 再比 |
+| 集名是 `剧名 - S03E18 - 白夜` | 取分隔符最后一段当标题 |
+| TMDB 一季 / Bangumi 拆上下部 | 拉续集链拼池；仍对不上就 `review` |
+| 某一季多两集把后面全顶偏 | 按季分段对齐，不跨季位移 |
+| 链上把「第二季」误挂进来 | 规模守卫拦下（13 集对 26 集 → `review`） |
+| 集名纯日文、纯数字 | 集数相等时走顺序映射，并在报告里标注 |
+| 番外挂在 Season 0 或名字里带 SP/OVA | 正片模式剔除，`special` 模式单独对 `type=1` |
+| 同一部剧两份（`/strm` + `/hdd`） | 各自独立扫描，不共享状态 |
+
+**跨版本、跨环境的兼容**
+
+- 鉴权头双发：`Authorization: MediaBrowser Token="…"` 和 `X-Emby-Token`。
+  Jellyfin 10.x 吃前者、部分 12.x 只认后者，实测单发会 401。
+- 取集不用 `/Shows/{seasonId}/Episodes`（某些版本返回 404 `Series not found`），
+  改用 `/Items?ParentId=`。
+- 网络：5xx / 429 / URLError 三次退避重试；单部剧失败只标 `review`，不中断整轮；
+  `--ipv4` 专治「有 IPv6 但实际不通、AAAA 还被污染」导致每部卡 20 秒的情况。
+- Python ≥ 3.8，零第三方依赖，`pip install` 完就有 `jbmid`。
+
+**安全与可撤销**
+
+- 只改一个字段，写后回读校验。
+- `--dry-run` 真读真算，不落盘。
+- 每次写入落 `(item_id, 旧值, 新值)`，`rollback` 一条命令还原。
+- 所有模糊判断最终都收敛到 `review`，而不是猜一个看起来成功的结果。
+
+## 它不解决什么
+
+1. **集名本身是错的**（整季集名都是从别的番抄来的）——先重刮元数据，工具不会替你猜剧情顺序。
+2. **集名没有任何信息**（纯「第 1 集」）且集数与 Bangumi 不等——只能 `review`。
+3. **Bangumi 上不存在的条目**——剧场版、特典短片、剧中剧不在 TV 链上，工具不会硬凑。
+4. **电影**不在处理范围。
+5. **需要 Bangumi 插件已安装**；`protect` 依赖插件的固定 GUID。
+6. 不做刮削、不改集名；Bangumi 的 `sort` 不是连续整数（如 8.5）时按浮点排序，不做四舍五入。
 
 ## 安装
 
@@ -197,12 +309,11 @@ jbmid protect
 
 ## 安全性
 
-- **只改一个字段**：GET 完整条目 → 只动 `ProviderIds.Bangumi` → POST 回去 →
-  再 GET 复查，并检查 `Name / Overview / PremiereDate` 等字段有没有被误伤。
+- **只改一个字段**：GET 完整条目 → 只动 `ProviderIds.Bangumi` → POST 回去 → 再 GET 复查，
+  并检查 `Name / Overview / PremiereDate / Imdb / Tmdb / Tvdb` 有没有被误伤。
 - **写前干跑**：`--dry-run` 会真的读一遍当前 ID，告诉你「会写几集」，不落盘。
 - **写前备份**：每次写入都把 `(item_id, 旧值, 新值)` 落到 json，`rollback` 一条命令还原。
-- **不合格不写**：集数对不上、集名匹配率不够、锚点标题不符，一律 `review`，
-  一个字都不改。
+- **不合格不写**：集数对不上、集名匹配率不够、锚点标题不符，一律 `review`，一个字都不改。
 - 工具不会删除任何条目，也不会改动媒体的文件路径或元数据文本。
 
 ## 常见问题
@@ -232,22 +343,28 @@ Key 不对，或者你给的是别的服务器的 key。`jbmid doctor` 先确认
 正是 `season` 模式的用武之地：第 1 季指向第一个 subject，第 2 季指向第二个。
 如果两个条目在 Bangumi 上是「续集」关系，`scan` 模式也能自动拼起来。
 
-## 已知限制
-
-- 只处理**剧集（Episode）**，电影不支持。
-- 不做刮削、不改集名。集名本身就是错的（比如整季集名都是另一部番的），
-  先修好元数据再来跑本工具。
-- Bangumi 的 `sort` 不是连续整数（如 8.5）时，池子按 `sort` 排序，不做四舍五入。
-- 需要 Bangumi 插件已安装；`protect` 子命令依赖插件的固定 GUID。
-
 ## 开发
 
 ```bash
 pip install -e .
-python -m unittest discover -s tests -v     # 13 个用例，不联网
+python -m unittest discover -s tests -v     # 16 个用例，不联网
 ```
 
-测试覆盖集名切分、相似度、单调对齐、空档补齐、扫描判定、写入与回滚。
+测试覆盖集名切分、相似度、单调对齐、空档补齐、扫描判定、番外匹配、写入与回滚。
+
+### 发布新版本
+
+```bash
+# 1) 改版本号（pyproject.toml / __init__.py）和 CHANGELOG.md
+# 2) 跑测试
+python -m unittest discover -s tests
+# 3) 提交并打 tag
+git commit -am "chore: release v1.1.0"
+git tag -a v1.1.0 -m "v1.1.0"
+git push origin master --tags
+# 4) 在 GitHub 的 Releases 页面用 tag 建一个 release（可附 wheel）
+python -m pip wheel . --no-deps -w dist
+```
 
 ## License
 
