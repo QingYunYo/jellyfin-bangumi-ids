@@ -229,7 +229,7 @@ jbmid protect     # sets TrustExistedBangumiId = True so refreshes stop overwrit
 jbmid doctor      # connectivity / data source / plugin state
 ```
 
-Every sample output in both READMEs comes from `examples/` (real reports and backups, trimmed).
+Every sample output in both READMEs comes from [`examples/`](examples/README.md) (real reports and backups, trimmed, with field notes).
 
 ### 4.9 Putting it together: the order that actually works
 

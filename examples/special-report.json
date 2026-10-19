@@ -3,6 +3,39 @@
  "mode": "special",
  "series": [
   {
+   "series": "86-不存在的战区-",
+   "series_id": "7b477cd9398319fd475e8a76ce46c8af",
+   "status": "ok",
+   "reason": "",
+   "episodes": [
+    {
+     "season": 0,
+     "index": 2,
+     "name": "总集篇「在战场上绽放的红色虞美人」",
+     "old": "1038360",
+     "bgm_id": "1038360",
+     "bgm_name": "特别篇「血红的战场上 绽放虞美人之花」",
+     "sim": 0.58,
+     "change": false,
+     "item_id": "f58549b66bd45535aa5ab563bd419a62"
+    }
+   ],
+   "to_write": 0,
+   "chain": [
+    302189,
+    331887
+   ],
+   "notes": [],
+   "anchor": 302189,
+   "anchor_how": "episode-parent",
+   "pool": 4,
+   "local": 4,
+   "matched": 1,
+   "mean_sim": 0.58,
+   "coverage": 0.25,
+   "borrowed_cleared": 0
+  },
+  {
    "series": "CLANNAD",
    "series_id": "317488b2c4f8ce6eab5944f42d891eee",
    "status": "ok",
@@ -18,17 +51,6 @@
      "sim": 1.0,
      "change": false,
      "item_id": "77658c599d9b78269e22c93a272686f1"
-    },
-    {
-     "season": 0,
-     "index": 3,
-     "name": "一年前的事",
-     "old": "7542",
-     "bgm_id": "7542",
-     "bgm_name": "一年前的事",
-     "sim": 1.0,
-     "change": false,
-     "item_id": "3ec6da860f27109f2fe87de989c2d00b"
     }
    ],
    "to_write": 0,
@@ -48,10 +70,10 @@
   }
  ],
  "summary": {
-  "series_ok": 13,
-  "series_review": 76,
+  "series_ok": 2,
+  "series_review": 10,
   "episodes_to_write": 0,
-  "specials_matched": 19,
+  "specials_matched": 4,
   "specials_cleared": 0
  }
 }

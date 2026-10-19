@@ -1,0 +1,49 @@
+{
+ "library": "电视剧",
+ "threshold": 0.45,
+ "series": [
+  {
+   "series": "Adolescence",
+   "series_id": "3f4b9a9318affe6a7fa6508df34f2068",
+   "seasons": 1,
+   "status": "review",
+   "reason": "size mismatch 4 local vs 12 pool",
+   "anchor": 214208,
+   "anchor_how": "search",
+   "chain": [
+    174998,
+    214208
+   ],
+   "episodes": [],
+   "to_write": 0,
+   "coverage": 0.0,
+   "mean_sim": 0.0,
+   "skipped_specials": 0,
+   "notes": [],
+   "season_issues": []
+  },
+  {
+   "series": "Andor",
+   "series_id": "f1e74da5862bca2c894c9463047b3492",
+   "seasons": 2,
+   "status": "review",
+   "reason": "no Bangumi anchor (set one on the series or a season, or check the title)",
+   "anchor": null,
+   "anchor_how": "none",
+   "chain": [],
+   "episodes": [],
+   "to_write": 0,
+   "coverage": 0.0,
+   "mean_sim": 0.0,
+   "skipped_specials": 0,
+   "notes": []
+  }
+ ],
+ "summary": {
+  "series_ok": 0,
+  "series_review": 12,
+  "episodes_to_write": 0,
+  "season_mismatch": 1,
+  "season_spans": 0
+ }
+}

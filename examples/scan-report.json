@@ -9,7 +9,7 @@
    "status": "ok",
    "reason": "",
    "anchor": 410346,
-   "anchor_how": "series-id",
+   "anchor_how": "episode-parent",
    "chain": [
     410346
    ],
@@ -23,6 +23,7 @@
      "bgm_name": "来自异次元的新生",
      "old": "1336023",
      "change": false,
+     "subject": 410346,
      "sim": 0.8
     },
     {
@@ -34,6 +35,7 @@
      "bgm_name": "共同出角的预感",
      "old": "1336024",
      "change": false,
+     "subject": 410346,
      "sim": 1.0
     }
    ],
@@ -42,74 +44,125 @@
    "mean_sim": 0.902859477124183,
    "skipped_specials": 0,
    "notes": [
-    "chain trimmed to 1 subject(s)"
-   ]
+    "chain trimmed to 1 subject(s)",
+    "kept 24 existing ids (library order differs from Bangumi)"
+   ],
+   "season_issues": []
   },
   {
-   "series": "命运之夜 无限剑制",
-   "series_id": "a293c7535a3f93513299e770f4ad27f6",
-   "seasons": 2,
-   "status": "review",
-   "reason": "size mismatch 25 local vs 51 pool",
-   "anchor": 95225,
-   "anchor_how": "series-id",
+   "series": "86-不存在的战区-",
+   "series_id": "7b477cd9398319fd475e8a76ce46c8af",
+   "seasons": 1,
+   "status": "ok",
+   "reason": "",
+   "anchor": 302189,
+   "anchor_how": "episode-parent",
    "chain": [
-    10639,
-    95225,
-    109386
+    302189,
+    331887
    ],
    "episodes": [
     {
-     "item_id": "75db301f682370863005db3279947091",
+     "item_id": "9db1c363dd5b15eca7fb9217eea42213",
      "season": 1,
      "index": 1,
-     "name": "冬之日，命运之夜",
-     "bgm_id": "435522",
-     "bgm_name": "冬日，命运之夜",
-     "old": "435522",
+     "name": "送葬者",
+     "bgm_id": "1018664",
+     "bgm_name": "送葬者(Undertaker)",
+     "old": "1018664",
      "change": false,
-     "sim": 0.923
+     "subject": 302189,
+     "sim": 0.375
     },
     {
-     "item_id": "6c303690a9c5843c15dd27db09c3f343",
+     "item_id": "1343cae48ad33dff011b4091c0ca1117",
      "season": 1,
      "index": 2,
-     "name": "开幕之时",
-     "bgm_id": "436160",
-     "bgm_name": "开幕之时",
-     "old": "436160",
+     "name": "先锋战队",
+     "bgm_id": "1018665",
+     "bgm_name": "先锋战队(Speardhead)",
+     "old": "1018665",
      "change": false,
+     "subject": 302189,
+     "sim": 0.444
+    }
+   ],
+   "to_write": 0,
+   "coverage": 1.0,
+   "mean_sim": 0.7269323671497585,
+   "skipped_specials": 4,
+   "notes": [
+    "kept 23 existing ids (library order differs from Bangumi)",
+    "season 1 id None -> 331887 (12/23 episodes)"
+   ],
+   "season_issues": [
+    {
+     "season": 1,
+     "season_id": "56c3dcb900062b74a6d28513309e8b69",
+     "name": "第 1 季",
+     "current": null,
+     "expected": 331887,
+     "votes": {
+      "302189": 11,
+      "331887": 12
+     },
+     "count": 12,
+     "total": 23
+    }
+   ]
+  },
+  {
+   "series": "拔作岛",
+   "series_id": "87be17fcb791f5e80d99de0abda339ac",
+   "seasons": 1,
+   "status": "ok",
+   "reason": "",
+   "anchor": 477825,
+   "anchor_how": "episode-parent",
+   "chain": [
+    477825
+   ],
+   "episodes": [
+    {
+     "item_id": "5835eb591fcd7353f6745de2b9b02572",
+     "season": 1,
+     "index": 1,
+     "name": "色情条例",
+     "bgm_id": "1525346",
+     "bgm_name": "色情条例",
+     "old": "1525346",
+     "change": false,
+     "subject": 477825,
+     "sim": 1.0
+    },
+    {
+     "item_id": "4cba63a8f11c83913e2bf99b52604b55",
+     "season": 1,
+     "index": 2,
+     "name": "救性主",
+     "bgm_id": "1525347",
+     "bgm_name": "救性主",
+     "old": "1525347",
+     "change": false,
+     "subject": 477825,
      "sim": 1.0
     }
    ],
    "to_write": 0,
    "coverage": 1.0,
-   "mean_sim": 0.9462093462093462,
+   "mean_sim": 0.9363636363636364,
    "skipped_specials": 0,
-   "notes": []
-  },
-  {
-   "series": "凉宫春日的忧郁",
-   "series_id": "66cd9aade8589fc19b81d5776ffeccd6",
-   "seasons": 1,
-   "status": "review",
-   "reason": "weak match: coverage 0%, mean sim 0.00",
-   "anchor": 1372,
-   "anchor_how": "series-id",
-   "chain": [
-    1372
+   "notes": [
+    "kept 11 existing ids (library order differs from Bangumi)"
    ],
-   "episodes": [],
-   "to_write": 0,
-   "coverage": 0.0,
-   "mean_sim": 0.0,
-   "skipped_specials": 0,
-   "notes": []
+   "season_issues": []
   }
  ],
  "summary": {
-  "series_ok": 82,
-  "series_review": 7,
-  "episodes_to_write": 0
+  "series_ok": 12,
+  "series_review": 0,
+  "episodes_to_write": 0,
+  "season_mismatch": 0,
+  "season_spans": 1
  }
 }

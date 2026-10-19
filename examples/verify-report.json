@@ -20,6 +20,8 @@
    ]
   }
  ],
+ "season_rows": [],
+ "span_rows": [],
  "rows": [
   {
    "series": "2.5次元的诱惑",
@@ -34,18 +36,36 @@
    "kind": "low_similarity"
   },
   {
-   "series": "2.5次元的诱惑",
-   "item_id": "b26e461ef2192782398fe9c6266ecfb9",
-   "bgm_id": 1336045,
-   "local": "沙滩上的漫研",
+   "series": "凉宫春日的忧郁",
+   "item_id": "074ba0bac4545e69057edba6265df0d9",
+   "bgm_id": 6297,
+   "local": "凉宫春日的忧郁 I",
    "season": 1,
-   "index": 23,
-   "bgm": "漫研 on the beach",
-   "subject": 410346,
-   "sim": 0.222,
-   "kind": "low_similarity"
+   "index": 2,
+   "bgm": "涼宮春日的憂鬱 I",
+   "subject": 1606,
+   "sim": 0.5,
+   "kind": "disorder",
+   "expected": 26,
+   "got": 1
+  },
+  {
+   "series": "CLANNAD",
+   "item_id": "e5b036a9e104e939cd4a1d09a186b96c",
+   "bgm_id": 163413,
+   "local": "另一个世界 智代篇",
+   "season": 0,
+   "index": 2,
+   "bgm": "もうひとつの世界 智代編",
+   "subject": 37873,
+   "sim": 0.421,
+   "kind": "foreign_subject",
+   "subject_name": "CLANNAD 另一个世界 智代篇"
   }
  ],
- "season_rows": [],
- "span_rows": []
+ "subjects": [
+  12,
+  51,
+  265
+ ]
 }

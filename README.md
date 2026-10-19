@@ -217,7 +217,7 @@ jbmid protect     # 把 TrustExistedBangumiId 设为 True，刷新不再覆盖
 jbmid doctor      # 连通性 / 数据源 / 插件状态
 ```
 
-两份 README 里的示例输出都来自 `examples/`（真实报告与备份的节选）。
+两份 README 里的示例输出都来自 [`examples/`](examples/README.md)（真实报告与备份的节选，附字段说明）。
 
 ### 4.9 综合用法：真实修复时的顺序
 
