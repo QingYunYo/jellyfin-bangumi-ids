@@ -474,6 +474,33 @@ order itself is in 7.1).
 Changes go into `anchor-backup.json`, in the same shape as episode backups, so `rollback` restores
 them too.
 
+**Check season-level IDs too.** The plugin reports "watching" with the **season**'s Bangumi ID
+(`PlaybackScrobbler` asks the episode's parent); episode IDs only drive per-episode status. So
+"every episode is right, the season sits one show off" is invisible to any per-episode check:
+playback looks fine while bgm.tv records the neighbouring season. The episode IDs vote it out:
+
+```bash
+# Report only: which season ID is not the majority vote of its own episodes
+jbmid anchor --library 动漫 --seasons --all --dry-run
+
+# Fix them (written to a backup file; `rollback` restores it)
+jbmid anchor --library 动漫 --seasons --all
+```
+
+```text
+$ jbmid anchor --library 动漫 --seasons --all --dry-run
+凉宫春日的忧郁
+  season 1   id 1372     -> 1606     (28/28 episodes)
+人形电脑天使心
+  season 1   id 496276   -> 12       (26/26 episodes)
+37 season id(s) off, 0 written (dry run)
+```
+
+Only seasons with a vote share of at least 60% and at least 2 episodes are written; the rest are
+reported (`--force` overrides). When one local season spans two Bangumi subjects (86 season 1 is
+two parts), the vote cannot reach 60% and the stored value stays -- there is no single right ID.
+
+
 ### 7.6 `verify` — read-only health check
 
 ```bash
@@ -499,7 +526,7 @@ Report excerpt: [`examples/verify-report.json`](examples/verify-report.json).
 ```text
 $ jbmid verify --library 动漫
 data source    : offline archive /path/to/bangumi/archive
-offline check: 2095 ids | unknown 0 | dup 3 | low-sim 278 | disorder 22 | foreign 5 | anchors 0
+offline check: 2095 ids | unknown 0 | dup 3 | low-sim 278 | disorder 22 | foreign 5 | anchors 0 | season-ids 7
 ```
 
 Besides those six counters, `check.json` lists the details per category:
@@ -508,7 +535,7 @@ Besides those six counters, `check.json` lists the details per category:
 {
   "checked": 2095, "threshold": 0.45,
   "unknown": 0, "duplicate": 3, "low_similarity": 278,
-  "disorder": 22, "foreign_subject": 5, "anchor_rows": [],
+  "disorder": 22, "foreign_subject": 5, "anchor_rows": [], "season_rows": [],
   "duplicate_series": [
     {"name": "间谍过家家",
      "paths": ["/strm/Anime/…/间谍过家家 (2022)", "/hdd/Anime/间谍过家家 (2022)"]}
@@ -868,7 +895,7 @@ of guessing. Defences against "someone else's library" are in the table in 8.8.
 
 ```bash
 pip install -e .
-python -m unittest discover -s tests -v     # 71 tests, offline
+python -m unittest discover -s tests -v     # 80 tests, offline
 ```
 
 Coverage: title splitting, similarity, monotonic alignment, gap filling, scan decisions, special
@@ -895,7 +922,7 @@ src/jellyfin_bangumi_ids/
   anchor.py        anchor diagnosis and repair
   verify.py        read-only health check
   transport.py     retries and IPv4
-tests/             71 tests, offline
+tests/             80 tests, offline
 examples/          real output samples: report / backup / verify / specials / season map
 ```
 

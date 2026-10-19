@@ -9,7 +9,7 @@ import time
 from typing import Any, Dict, List, Optional
 
 from . import __version__
-from .anchor import run_anchor
+from .anchor import run_anchor, run_seasons
 from .auto import scan_auto
 from .bangumi import Bangumi
 from .jellyfin import Jellyfin
@@ -76,6 +76,9 @@ def cmd_scan(args: argparse.Namespace) -> int:
     print("series ok      : %d" % summary["series_ok"])
     print("series review  : %d" % summary["series_review"])
     print("episodes       : %d to write" % summary["episodes_to_write"])
+    if summary.get("season_mismatch"):
+        print("season ids     : %d season(s) point at the wrong subject "
+              "(jbmid anchor --seasons --all)" % summary["season_mismatch"])
     print("report         : %s" % args.out)
     if summary["episodes_to_write"]:
         print("next           : jbmid apply %s --backup jbmid-backup.json" % args.out)
@@ -101,6 +104,17 @@ def cmd_special(args: argparse.Namespace) -> int:
 
 def cmd_anchor(args: argparse.Namespace) -> int:
     jf, bgm = clients_with_source(args)
+    if args.seasons:
+        if not args.series and not args.all:
+            print("--seasons needs --series NAME or --all", file=sys.stderr)
+            return 2
+        run_seasons(jf, bgm, name=args.series, library=args.library, all_series=args.all,
+                    dry_run=args.dry_run, force=args.force,
+                    backup_path=None if args.no_backup else args.backup)
+        return 0
+    if not args.series:
+        print("anchor needs --series NAME (or --seasons --all)", file=sys.stderr)
+        return 2
     run_anchor(jf, bgm, args.series, library=args.library, sid=args.id, clear=args.clear,
                force=args.force, dry_run=args.dry_run,
                backup_path=None if args.no_backup else args.backup)
@@ -240,13 +254,17 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("anchor", help="set or repair the Bangumi id on a series")
     common(p)
     p.add_argument("--library")
-    p.add_argument("--series", required=True)
+    p.add_argument("--series")
     p.add_argument("--id", type=int, help="explicit Bangumi subject id")
     p.add_argument("--clear", action="store_true", help="remove the series-level id")
     p.add_argument("--force", action="store_true", help="accept an id that fails the title check")
     p.add_argument("--backup", default="jbmid-anchor-backup.json")
     p.add_argument("--no-backup", action="store_true")
     p.add_argument("--dry-run", action="store_true")
+    p.add_argument("--seasons", action="store_true",
+                   help="repair season-level ids from the ids on their episodes")
+    p.add_argument("--all", action="store_true",
+                   help="with --seasons: every series in the library")
     p.set_defaults(func=cmd_anchor)
 
     p = sub.add_parser("apply", help="write the ids from a scan report")

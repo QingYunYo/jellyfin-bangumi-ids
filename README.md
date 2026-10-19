@@ -436,6 +436,31 @@ already correct, nothing to write
 
 改动会写进备份（`anchor-backup.json`），格式与集级备份一致，`rollback` 同样能还原。
 
+**季级 ID 也要查**：插件上报「在看」时用的是**季**的 Bangumi ID（`PlaybackScrobbler` 取这一集的父级），
+集级 ID 只负责单集状态。所以「集级全对、季级整体错位一格」这种故障，逐集检查永远发现不了：播放照常，
+bgm.tv 上却记到了相邻那一季。用集级 ID 投票即可定位：
+
+```bash
+# 只报告：哪一季的季级 ID 不是它自己集级 ID 的多数票
+jbmid anchor --library 动漫 --seasons --all --dry-run
+
+# 修正（写进备份，`rollback` 可还原）
+jbmid anchor --library 动漫 --seasons --all
+```
+
+```text
+$ jbmid anchor --library 动漫 --seasons --all --dry-run
+凉宫春日的忧郁
+  season 1   id 1372     -> 1606     (28/28 episodes)
+人形电脑天使心
+  season 1   id 496276   -> 12       (26/26 episodes)
+37 season id(s) off, 0 written (dry run)
+```
+
+只写「票数 ≥ 60% 且至少 2 集」的季；其余只报告（`--force` 强制）。一个本地季横跨两个 Bangumi 条目时
+（86 的第一季 = 两个 part），多数票天然过不了 60%，会保留原值——这种季没有唯一正确的季级 ID。
+
+
 ### 7.6 `verify`：只读体检
 
 ```bash
@@ -458,16 +483,16 @@ jbmid verify --library 动漫 --archive /path/to/bangumi/archive --out check.jso
 ```text
 $ jbmid verify --library 动漫
 data source    : offline archive /path/to/bangumi/archive
-offline check: 2095 ids | unknown 0 | dup 3 | low-sim 278 | disorder 22 | foreign 5 | anchors 0
+offline check: 2095 ids | unknown 0 | dup 3 | low-sim 278 | disorder 22 | foreign 5 | anchors 0 | season-ids 7
 ```
 
-`check.json` 里除了这 6 个计数，还分门别类列了明细：
+`check.json` 里除了这些计数，还分门别类列了明细；`season_rows` 是季级 ID 与它集级 ID 多数票不一致的季（修法见 7.5 的 `--seasons`）：
 
 ```json
 {
   "checked": 2095, "threshold": 0.45,
   "unknown": 0, "duplicate": 3, "low_similarity": 278,
-  "disorder": 22, "foreign_subject": 5, "anchor_rows": [],
+  "disorder": 22, "foreign_subject": 5, "anchor_rows": [], "season_rows": [],
   "duplicate_series": [
     {"name": "间谍过家家",
      "paths": ["/strm/Anime/…/间谍过家家 (2022)", "/hdd/Anime/间谍过家家 (2022)"]}
@@ -786,7 +811,7 @@ S01E05 - [Group] 白夜        ⟷  白夜            ✔ 1.00（先剥掉 [组�
 
 ```bash
 pip install -e .
-python -m unittest discover -s tests -v     # 71 个用例，不联网
+python -m unittest discover -s tests -v     # 80 个用例，不联网
 ```
 
 测试覆盖集名切分、相似度、单调对齐、空档补齐、扫描判定、番外匹配、库名解析、写入与回滚，
@@ -812,7 +837,7 @@ src/jellyfin_bangumi_ids/
   anchor.py        锚点诊断与修正
   verify.py        只读体检
   transport.py     重试与 IPv4
-tests/             71 个用例，不联网
+tests/             80 个用例，不联网
 examples/          真实输出节选：报告 / 备份 / 体检 / 番外 / season map
 ```
 

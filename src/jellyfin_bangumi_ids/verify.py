@@ -2,18 +2,21 @@
 from __future__ import annotations
 
 import json
+from collections import Counter
 from typing import Any, Dict, List, Optional
 
 from .match import clean_title, similarity
-from .scan import log
+from .scan import log, season_id_issues
 
 
 def run_verify(jf, bgm, library: Optional[str] = None, limit: Optional[int] = None,
                threshold: float = 0.45, out: str = "jbmid-check.json") -> Dict[str, Any]:
     checked = low = 0
     rows: List[Dict[str, Any]] = []
+    season_rows: List[Dict[str, Any]] = []
     subjects = set()
     for series in jf.all_series(library_name=library, limit=limit):
+        votes: Dict[int, "Counter[int]"] = {}
         for ep in jf.episodes(series["Id"]):
             pid = (ep.get("ProviderIds") or {}).get("Bangumi")
             if not pid:
@@ -26,6 +29,9 @@ def run_verify(jf, bgm, library: Optional[str] = None, limit: Optional[int] = No
                 continue
             checked += 1
             subjects.add(remote.get("subject_id"))
+            index = ep.get("ParentIndexNumber") or 0
+            if remote.get("subject_id") and index >= 1:
+                votes.setdefault(index, Counter())[remote["subject_id"]] += 1
             score = similarity(ep.get("Name") or "",
                                remote.get("name_cn") or remote.get("name") or "")
             if score < threshold:
@@ -33,12 +39,19 @@ def run_verify(jf, bgm, library: Optional[str] = None, limit: Optional[int] = No
                 rows.append({"series": series["Name"], "item_id": ep["Id"], "index": ep.get("IndexNumber"),
                              "local": ep.get("Name"), "bgm": remote.get("name_cn") or remote.get("name"),
                              "bgm_id": pid, "subject": remote.get("subject_id"), "sim": round(score, 3)})
-        log("checked %-40s total=%d low-sim=%d" % (series["Name"][:40], checked, low))
+        seasons = getattr(jf, "seasons", None)
+        for issue in season_id_issues(seasons(series["Id"]) if seasons else [], votes):
+            season_rows.append(dict(issue, series=series["Name"]))
+        log("checked %-40s total=%d low-sim=%d season-ids=%d"
+            % (series["Name"][:40], checked, low,
+               sum(1 for r in season_rows if r["series"] == series["Name"])))
     report = {"checked": checked, "low_similarity": low, "threshold": threshold,
-              "subjects": sorted(x for x in subjects if x), "rows": rows}
+              "subjects": sorted(x for x in subjects if x), "rows": rows,
+              "season_rows": season_rows}
     with open(out, "w", encoding="utf-8") as fh:
         json.dump(report, fh, ensure_ascii=False, indent=1)
-    log("checked %d episodes, %d below %.2f -> %s" % (checked, low, threshold, out))
+    log("checked %d episodes, %d below %.2f, %d season ids off -> %s"
+        % (checked, low, threshold, len(season_rows), out))
     return report
 
 
@@ -89,6 +102,7 @@ def run_verify_offline(jf, archive_dir: str, library: Optional[str] = None,
         remote_subjects = arc.collect_subjects(files["subject"], anchors | used_subjects)
 
     checked = unknown = low = foreign = disorder = 0
+    season_rows: List[Dict[str, Any]] = []
     seen: Dict[int, int] = {}
     rows: List[Dict[str, Any]] = []
     for series, sid, eps in local:
@@ -100,6 +114,15 @@ def run_verify_offline(jf, archive_dir: str, library: Optional[str] = None,
             row = remote_eps.get(pid) if pid else None
             if row and row.get("subject_id"):
                 usage[row["subject_id"]] = usage.get(row["subject_id"], 0) + 1
+        season_votes: Dict[int, "Counter[int]"] = {}
+        for ep in eps:
+            row_vote = remote_eps.get(arc.to_int((ep.get("ProviderIds") or {}).get("Bangumi")))
+            subject_vote = row_vote.get("subject_id") if row_vote else None
+            if subject_vote and (ep.get("ParentIndexNumber") or 0) >= 1:
+                season_votes.setdefault(ep.get("ParentIndexNumber") or 0, Counter())[subject_vote] += 1
+        seasons = getattr(jf, "seasons", None)
+        for issue in season_id_issues(seasons(series["Id"]) if seasons else [], season_votes):
+            season_rows.append(dict(issue, series=series["Name"]))
         last_sort: Dict[int, int] = {}
         for ep in eps:
             pid = arc.to_int((ep.get("ProviderIds") or {}).get("Bangumi"))
@@ -156,13 +179,15 @@ def run_verify_offline(jf, archive_dir: str, library: Optional[str] = None,
 
     report = {"checked": checked, "unknown": unknown, "duplicate": dup,
               "low_similarity": low, "foreign_subject": foreign, "disorder": disorder,
-              "threshold": threshold, "anchor_rows": anchor_rows,
+              "threshold": threshold, "anchor_rows": anchor_rows, "season_rows": season_rows,
               "duplicate_series": duplicate_series, "rows": rows,
               "subjects": sorted(x for x in used_subjects if x)}
     with open(out, "w", encoding="utf-8") as fh:
         json.dump(report, fh, ensure_ascii=False, indent=1)
-    log("offline check: %d ids | unknown %d | dup %d | low-sim %d | disorder %d | foreign %d | anchors %d -> %s"
-        % (checked, unknown, dup, low, disorder, foreign, len(anchor_rows), out))
+    log("offline check: %d ids | unknown %d | dup %d | low-sim %d | disorder %d | foreign %d "
+        "| anchors %d | season-ids %d -> %s"
+        % (checked, unknown, dup, low, disorder, foreign, len(anchor_rows),
+           len(season_rows), out))
     return report
 
 

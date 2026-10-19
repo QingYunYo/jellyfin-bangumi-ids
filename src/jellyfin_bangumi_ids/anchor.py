@@ -8,10 +8,11 @@ carry the accurate subject; the series id is only trusted when nothing else exis
 from __future__ import annotations
 
 import json
-from typing import Any, Dict, Optional, Tuple
+from collections import Counter
+from typing import Any, Dict, List, Optional, Tuple
 
 from .scan import (anchor_plausible, collect_local_episodes, episode_parent_vote, log,
-                   season_anchor, series_anchor, title_keys)
+                   season_anchor, season_id_issues, series_anchor, title_keys)
 
 
 def derive_anchor(bgm, jf, series: Dict[str, Any]) -> Tuple[Optional[int], str]:
@@ -72,4 +73,80 @@ def run_anchor(jf, bgm, name: str, library: Optional[str] = None,
             json.dump([{"item_id": series["Id"], "kind": "series", "series": series["Name"],
                         "old": current, "new": target}], fh, ensure_ascii=False, indent=1)
     log("wrote Bangumi=%s" % (target if target is not None else "(cleared)"))
+    return out
+
+
+def season_votes(bgm, jf, series: Dict[str, Any]) -> Dict[int, "Counter[int]"]:
+    """Vote每个季的条目归属 by the Bangumi ids already stored on its episodes."""
+    votes: Dict[int, "Counter[int]"] = {}
+    for season in jf.seasons(series["Id"]):
+        index = season.get("IndexNumber") or 0
+        if index < 1:
+            continue
+        for episode in jf.season_episodes(season["Id"]):
+            raw = (episode.get("ProviderIds") or {}).get("Bangumi")
+            if not raw:
+                continue
+            try:
+                remote = bgm.episode(int(raw))
+            except Exception:
+                continue
+            subject = remote.get("subject_id")
+            if subject:
+                votes.setdefault(index, Counter())[subject] += 1
+    return votes
+
+
+def season_report(bgm, jf, series: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """Seasons whose stored id is not the one their episodes point at."""
+    issues = season_id_issues(jf.seasons(series["Id"]), season_votes(bgm, jf, series))
+    for issue in issues:
+        issue["series"] = series["Name"]
+        issue["series_id"] = series["Id"]
+        issue["confident"] = issue["total"] >= 2 and issue["count"] / float(issue["total"]) >= 0.6
+    return issues
+
+
+def run_seasons(jf, bgm, name: Optional[str] = None, library: Optional[str] = None,
+                all_series: bool = False, dry_run: bool = False, force: bool = False,
+                backup_path: Optional[str] = None) -> Dict[str, Any]:
+    """Repair season-level Bangumi ids from the ids on their own episodes.
+
+    This is the check that catches the failure the plugin cannot: episode ids can be
+    perfect while the season id points a season back, and playback still reports the
+    wrong subject.  Only confident votes are written unless ``force`` is set.
+    """
+    if all_series:
+        targets = jf.all_series(library_name=library)
+    else:
+        targets = [jf.find_series(name, library_name=library)]
+    out: Dict[str, Any] = {"dry_run": dry_run, "series": len(targets), "issues": [], "fixed": 0}
+    written: List[Dict[str, Any]] = []
+    for series in targets:
+        issues = season_report(bgm, jf, series)
+        out["issues"].extend(issues)
+        if not issues:
+            continue
+        log("%s" % series["Name"])
+        for issue in issues:
+            log("  season %-3s id %-8s -> %-8s (%d/%d episodes)%s"
+                % (issue["season"], issue["current"] or "(none)", issue["expected"],
+                   issue["count"], issue["total"], "" if issue["confident"] else " [low confidence]"))
+            if dry_run or not (issue["confident"] or force):
+                continue
+            result = jf.set_provider_id(issue["season_id"], "Bangumi", issue["expected"])
+            issue["write"] = {"ok": result["ok"], "after": result["after"],
+                              "collateral": result["collateral"]}
+            if result["ok"]:
+                out["fixed"] += 1
+                written.append({"item_id": issue["season_id"], "kind": "season",
+                                "series": series["Name"], "season": issue["season"],
+                                "old": issue["current"], "new": issue["expected"]})
+            else:
+                log("  ! write failed, still %s" % result["after"])
+    if backup_path and written:
+        with open(backup_path, "w", encoding="utf-8") as fh:
+            json.dump(written, fh, ensure_ascii=False, indent=1)
+    log("%d season id(s) off, %d written%s"
+        % (len(out["issues"]), out["fixed"], " (dry run)" if dry_run else ""))
     return out

@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 import re
 import sys
+from collections import Counter
 from typing import Any, Dict, List, Optional, Tuple
 
 from .match import (align, episode_similarity, fill_gaps, is_special, name_match, similarity,
@@ -457,6 +458,7 @@ def _match_segments(segments: List[Tuple[List[Dict[str, Any]], List[Dict[str, An
                 "index": ep.get("IndexNumber"), "name": ep.get("Name"),
                 "bgm_id": target, "bgm_name": bgm_ep.get("name_cn") or bgm_ep.get("name"),
                 "old": current, "change": str(current) != target,
+                "subject": bgm_ep.get("subject_id"),
                 "sim": round(similarity(ep.get("Name") or "",
                                         bgm_ep.get("name_cn") or bgm_ep.get("name") or ""), 3),
             })
@@ -541,6 +543,16 @@ def scan_series(jf, bgm, series: Dict[str, Any], allow_search: bool = True,
     else:
         entry["status"] = OK
         entry["to_write"] = sum(1 for e in episodes if e["change"])
+    votes: Dict[int, "Counter[int]"] = {}
+    for row in episodes:
+        if row.get("subject") and (row.get("season") or 0) >= 1:
+            votes.setdefault(row["season"], Counter())[row["subject"]] += 1
+    issues = season_id_issues(jf.seasons(series["Id"]), votes)
+    entry["season_issues"] = issues
+    for issue in issues[:3]:
+        entry["notes"].append("season %d id %s -> %s (%d/%d episodes)"
+                              % (issue["season"], issue["current"], issue["expected"],
+                                 issue["count"], issue["total"]))
     return entry
 
 
@@ -723,6 +735,36 @@ def run_specials(jf, bgm, library=None, limit=None, verbose=False,
     return report
 
 
+def season_id_issues(seasons: List[Dict[str, Any]],
+                     votes: Dict[int, "Counter[int]"]) -> List[Dict[str, Any]]:
+    """Seasons whose stored Bangumi id disagrees with the ids on their episodes.
+
+    The plugin reports "watching" with the *season* id (`PlaybackScrobbler` asks the
+    parent item), while episode ids drive per-episode status.  A season id that drifted
+    to a neighbouring subject therefore stays invisible to every episode-level check:
+    playback looks fine, but bgm.tv gets a different show's status.  Vote with the
+    episode ids and compare.
+    """
+    issues: List[Dict[str, Any]] = []
+    for season in seasons:
+        index = season.get("IndexNumber") or 0
+        if index < 1:
+            continue
+        counter = votes.get(index)
+        if not counter:
+            continue
+        expected, count = counter.most_common(1)[0]
+        current = (season.get("ProviderIds") or {}).get("Bangumi")
+        if str(current or "") == str(expected):
+            continue
+        issues.append({
+            "season": index, "season_id": season["Id"], "name": season.get("Name"),
+            "current": current, "expected": expected,
+            "votes": dict(counter), "count": count, "total": sum(counter.values()),
+        })
+    return issues
+
+
 def run_scan(jf, bgm, library: Optional[str] = None, limit: Optional[int] = None,
              allow_search: bool = True, threshold: float = 0.45,
              out: str = "jbmid-report.json") -> Dict[str, Any]:
@@ -749,6 +791,7 @@ def run_scan(jf, bgm, library: Optional[str] = None, limit: Optional[int] = None
         "series_ok": len(ok),
         "series_review": len(report["series"]) - len(ok),
         "episodes_to_write": sum(e.get("to_write", 0) for e in ok),
+        "season_mismatch": sum(len(e.get("season_issues") or []) for e in report["series"]),
     }
     with open(out, "w", encoding="utf-8") as fh:
         json.dump(report, fh, ensure_ascii=False, indent=1)
