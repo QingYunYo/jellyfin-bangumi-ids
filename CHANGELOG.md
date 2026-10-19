@@ -15,7 +15,12 @@
 - `anchor --seasons`：按每个季的集级 ID 投票，修正**季级** Bangumi ID。Bangumi 插件上报「在看」
   读的是季的 ID（`PlaybackScrobbler` 取父级），集级 ID 全对、季级错位一格时逐集检查完全看不出来：
   播放照常，bgm.tv 却记到相邻那一季。只写票数 ≥60% 且至少 2 集的季，其余只报告；`--all` 走整库。
-- `verify` 增加 `season_rows`（季级 ID 与集级多数票不一致的季）与终端计数 `season-ids`。
+- 新增 `anchor --seasons --clear-spans`：**一个本地季横跨两个 Bangumi 条目时不存在唯一正确的季级 ID**，
+  写哪个都会让另一半集被报成隔壁条目。清空后插件退回「用这一集自己的 ID」反查条目——实测同一集日志从
+  `report subject #525565` 变为 `report subject #638497`。本库清掉 7 个横跨季（86、间谍过家家、进击的巨人、
+  无职转生 S1/S2、葬送的芙莉莲、Re:从零、赛马娘 芦毛灰姑娘、物语 S12 等，备份可 `rollback`）。
+- `verify` 增加 `season_rows`（季级 ID 与集级多数票不一致的季）与终端计数 `season-ids`；新增 `span_rows`
+  与 `season-spans`（横跨两个条目、仍写着季级 ID 的季），清空后本库从 `season-ids 6` 降到 `season-ids 1`。
 - `scan` 的 summary 增加 `season_mismatch`，命中时在 `notes` 里写明「季级 ID -> 期望值」。
 - 文档重排（只改文档，不动代码）：中文 README 改成 1–16 章的四级标题结构，章首加目录锚点；
   「模式详解」的七个模式各自展开为 7.1–7.7，每个模式都附真实输入与终端输出，并在合适位置给出

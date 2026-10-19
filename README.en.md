@@ -497,8 +497,32 @@ $ jbmid anchor --library 动漫 --seasons --all --dry-run
 ```
 
 Only seasons with a vote share of at least 60% and at least 2 episodes are written; the rest are
-reported (`--force` overrides). When one local season spans two Bangumi subjects (86 season 1 is
-two parts), the vote cannot reach 60% and the stored value stays -- there is no single right ID.
+reported (`--force` overrides).
+
+**A local season that spans two Bangumi subjects has no single right ID.** Whichever one is stored,
+episodes of the other subject report the neighbouring entry (86 season 1 is two parts; so is
+Mushoku Tensei season 1). Clear those season IDs with `--clear-spans`: `PlaybackScrobbler` then falls
+back to the episode's own ID and resolves the subject from it. Same episode, measured:
+
+```text
+before: report subject #525565 status Watching   <- the stored first part
+after : report subject #638497 status Watching   <- the part this episode belongs to
+```
+
+```bash
+# Clear every season that spans two subjects (backed up; `rollback` restores it)
+jbmid anchor --library 动漫 --seasons --all --clear-spans --dry-run
+jbmid anchor --library 动漫 --seasons --all --clear-spans
+```
+
+```text
+$ jbmid anchor --library 动漫 --seasons --all --clear-spans --dry-run
+86-不存在的战区-
+  season 1   id 302189   -> (cleared) (12/23 episodes) [clear: spanning season]
+进击的巨人
+  season 3   id 217300   -> (cleared) (12/22 episodes) [clear: spanning season]
+17 season id(s) off, 0 written (dry run)
+```
 
 
 ### 7.6 `verify` — read-only health check
@@ -526,16 +550,19 @@ Report excerpt: [`examples/verify-report.json`](examples/verify-report.json).
 ```text
 $ jbmid verify --library 动漫
 data source    : offline archive /path/to/bangumi/archive
-offline check: 2095 ids | unknown 0 | dup 3 | low-sim 278 | disorder 22 | foreign 5 | anchors 0 | season-ids 7
+offline check: 2095 ids | unknown 0 | dup 3 | low-sim 278 | disorder 22 | foreign 5 | anchors 0 | season-ids 1 | season-spans 0
 ```
 
-Besides those six counters, `check.json` lists the details per category:
+Besides those counters, `check.json` lists the details per category: `season_rows` holds seasons whose
+season ID is not the majority vote of their own episodes (fix: `--seasons`, see 7.5); `span_rows` holds
+seasons that span two subjects yet still carry one season ID (fix: `--clear-spans`, see 7.5). Once
+cleared, those seasons no longer count towards `season-ids`, so the health check can come back clean:
 
 ```json
 {
   "checked": 2095, "threshold": 0.45,
   "unknown": 0, "duplicate": 3, "low_similarity": 278,
-  "disorder": 22, "foreign_subject": 5, "anchor_rows": [], "season_rows": [],
+  "disorder": 22, "foreign_subject": 5, "anchor_rows": [], "season_rows": [], "span_rows": [],
   "duplicate_series": [
     {"name": "间谍过家家",
      "paths": ["/strm/Anime/…/间谍过家家 (2022)", "/hdd/Anime/间谍过家家 (2022)"]}

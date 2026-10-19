@@ -6,7 +6,24 @@ from collections import Counter
 from typing import Any, Dict, List, Optional
 
 from .match import clean_title, similarity
-from .scan import log, season_id_issues
+from .scan import log, season_id_issues, spanning_seasons
+
+
+def season_index_map(season_list: List[Dict[str, Any]]) -> Dict[str, int]:
+    """SeasonId -> IndexNumber, so episodes can be grouped by the season they belong to."""
+    return {se["Id"]: se.get("IndexNumber") for se in season_list or [] if se.get("Id")}
+
+
+def episode_season(episode: Dict[str, Any], season_ix: Dict[str, int]) -> int:
+    """The season an episode belongs to.
+
+    Jellyfin can report ParentIndexNumber == 1 for every season of a show (seen on a
+    25-episode series split into two seasons), so SeasonId wins when it is known.
+    """
+    index = season_ix.get(episode.get("SeasonId"))
+    if index is None:
+        index = episode.get("ParentIndexNumber") or 0
+    return index
 
 
 def run_verify(jf, bgm, library: Optional[str] = None, limit: Optional[int] = None,
@@ -14,8 +31,12 @@ def run_verify(jf, bgm, library: Optional[str] = None, limit: Optional[int] = No
     checked = low = 0
     rows: List[Dict[str, Any]] = []
     season_rows: List[Dict[str, Any]] = []
+    span_rows: List[Dict[str, Any]] = []
     subjects = set()
     for series in jf.all_series(library_name=library, limit=limit):
+        seasons = getattr(jf, "seasons", None)
+        season_list = (seasons(series["Id"]) if seasons else []) or []
+        season_ix = season_index_map(season_list)
         votes: Dict[int, "Counter[int]"] = {}
         for ep in jf.episodes(series["Id"]):
             pid = (ep.get("ProviderIds") or {}).get("Bangumi")
@@ -29,7 +50,9 @@ def run_verify(jf, bgm, library: Optional[str] = None, limit: Optional[int] = No
                 continue
             checked += 1
             subjects.add(remote.get("subject_id"))
-            index = ep.get("ParentIndexNumber") or 0
+            # SeasonId is authoritative: Jellyfin can leave ParentIndexNumber at 1
+            # for every season of a show, which would merge separate seasons.
+            index = episode_season(ep, season_ix)
             if remote.get("subject_id") and index >= 1:
                 votes.setdefault(index, Counter())[remote["subject_id"]] += 1
             score = similarity(ep.get("Name") or "",
@@ -39,15 +62,19 @@ def run_verify(jf, bgm, library: Optional[str] = None, limit: Optional[int] = No
                 rows.append({"series": series["Name"], "item_id": ep["Id"], "index": ep.get("IndexNumber"),
                              "local": ep.get("Name"), "bgm": remote.get("name_cn") or remote.get("name"),
                              "bgm_id": pid, "subject": remote.get("subject_id"), "sim": round(score, 3)})
-        seasons = getattr(jf, "seasons", None)
-        for issue in season_id_issues(seasons(series["Id"]) if seasons else [], votes):
+        spans = spanning_seasons(votes)
+        for issue in season_id_issues(season_list, votes):
+            if issue["season"] in spans:
+                if issue["current"] is not None:
+                    span_rows.append(dict(issue, series=series["Name"]))
+                continue
             season_rows.append(dict(issue, series=series["Name"]))
         log("checked %-40s total=%d low-sim=%d season-ids=%d"
             % (series["Name"][:40], checked, low,
                sum(1 for r in season_rows if r["series"] == series["Name"])))
     report = {"checked": checked, "low_similarity": low, "threshold": threshold,
               "subjects": sorted(x for x in subjects if x), "rows": rows,
-              "season_rows": season_rows}
+              "season_rows": season_rows, "span_rows": span_rows}
     with open(out, "w", encoding="utf-8") as fh:
         json.dump(report, fh, ensure_ascii=False, indent=1)
     log("checked %d episodes, %d below %.2f, %d season ids off -> %s"
@@ -103,9 +130,13 @@ def run_verify_offline(jf, archive_dir: str, library: Optional[str] = None,
 
     checked = unknown = low = foreign = disorder = 0
     season_rows: List[Dict[str, Any]] = []
+    span_rows: List[Dict[str, Any]] = []
     seen: Dict[int, int] = {}
     rows: List[Dict[str, Any]] = []
     for series, sid, eps in local:
+        seasons = getattr(jf, "seasons", None)
+        season_list = (seasons(series["Id"]) if seasons else []) or []
+        season_ix = season_index_map(season_list)
         eps = sorted(eps, key=lambda e: ((e.get("ParentIndexNumber") or 0),
                                         (e.get("IndexNumber") or 0)))
         usage: Dict[int, int] = {}
@@ -118,10 +149,15 @@ def run_verify_offline(jf, archive_dir: str, library: Optional[str] = None,
         for ep in eps:
             row_vote = remote_eps.get(arc.to_int((ep.get("ProviderIds") or {}).get("Bangumi")))
             subject_vote = row_vote.get("subject_id") if row_vote else None
-            if subject_vote and (ep.get("ParentIndexNumber") or 0) >= 1:
-                season_votes.setdefault(ep.get("ParentIndexNumber") or 0, Counter())[subject_vote] += 1
-        seasons = getattr(jf, "seasons", None)
-        for issue in season_id_issues(seasons(series["Id"]) if seasons else [], season_votes):
+            index = episode_season(ep, season_ix)
+            if subject_vote and index >= 1:
+                season_votes.setdefault(index, Counter())[subject_vote] += 1
+        spans = spanning_seasons(season_votes)
+        for issue in season_id_issues(season_list, season_votes):
+            if issue["season"] in spans:
+                if issue["current"] is not None:
+                    span_rows.append(dict(issue, series=series["Name"]))
+                continue
             season_rows.append(dict(issue, series=series["Name"]))
         last_sort: Dict[int, int] = {}
         for ep in eps:
@@ -185,9 +221,9 @@ def run_verify_offline(jf, archive_dir: str, library: Optional[str] = None,
     with open(out, "w", encoding="utf-8") as fh:
         json.dump(report, fh, ensure_ascii=False, indent=1)
     log("offline check: %d ids | unknown %d | dup %d | low-sim %d | disorder %d | foreign %d "
-        "| anchors %d | season-ids %d -> %s"
+        "| anchors %d | season-ids %d | season-spans %d -> %s"
         % (checked, unknown, dup, low, disorder, foreign, len(anchor_rows),
-           len(season_rows), out))
+           len(season_rows), len(span_rows), out))
     return report
 
 

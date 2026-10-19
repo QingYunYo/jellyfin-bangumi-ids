@@ -457,8 +457,31 @@ $ jbmid anchor --library 动漫 --seasons --all --dry-run
 37 season id(s) off, 0 written (dry run)
 ```
 
-只写「票数 ≥ 60% 且至少 2 集」的季；其余只报告（`--force` 强制）。一个本地季横跨两个 Bangumi 条目时
-（86 的第一季 = 两个 part），多数票天然过不了 60%，会保留原值——这种季没有唯一正确的季级 ID。
+只写「票数 ≥ 60% 且至少 2 集」的季；其余只报告（`--force` 强制）。
+
+**一个本地季横跨两个 Bangumi 条目时，不存在唯一正确的季级 ID**：写哪个，另一半集都会被报成隔壁条目
+（86 的第一季 = 两个 part，无职转生的第一季同理）。这类季用 `--clear-spans` 清空季级 ID——清空后
+`PlaybackScrobbler` 会退回「用这一集自己的 ID」再反查条目。实测同一集的日志：
+
+```text
+清空前：report subject #525565 status Watching   ← 写死的第一 part
+清空后：report subject #638497 status Watching   ← 这一集自己所属的 part
+```
+
+```bash
+# 清空所有横跨两个条目的季（写进备份，`rollback` 可还原）
+jbmid anchor --library 动漫 --seasons --all --clear-spans --dry-run
+jbmid anchor --library 动漫 --seasons --all --clear-spans
+```
+
+```text
+$ jbmid anchor --library 动漫 --seasons --all --clear-spans --dry-run
+86-不存在的战区-
+  season 1   id 302189   -> (cleared) (12/23 episodes) [clear: spanning season]
+进击的巨人
+  season 3   id 217300   -> (cleared) (12/22 episodes) [clear: spanning season]
+17 season id(s) off, 0 written (dry run)
+```
 
 
 ### 7.6 `verify`：只读体检
@@ -483,16 +506,18 @@ jbmid verify --library 动漫 --archive /path/to/bangumi/archive --out check.jso
 ```text
 $ jbmid verify --library 动漫
 data source    : offline archive /path/to/bangumi/archive
-offline check: 2095 ids | unknown 0 | dup 3 | low-sim 278 | disorder 22 | foreign 5 | anchors 0 | season-ids 7
+offline check: 2095 ids | unknown 0 | dup 3 | low-sim 278 | disorder 22 | foreign 5 | anchors 0 | season-ids 1 | season-spans 0
 ```
 
-`check.json` 里除了这些计数，还分门别类列了明细；`season_rows` 是季级 ID 与它集级 ID 多数票不一致的季（修法见 7.5 的 `--seasons`）：
+`check.json` 里除了这些计数，还分门别类列了明细：`season_rows` 是季级 ID 与它集级 ID 多数票不一致的季
+（修法见 7.5 的 `--seasons`）；`span_rows` 是**横跨两个条目、却仍写着一个季级 ID** 的季（修法见 7.5 的
+`--clear-spans`）——清空之后这些季不再计入 `season-ids`，所以体检结果才能回到「季级也对得上」：
 
 ```json
 {
   "checked": 2095, "threshold": 0.45,
   "unknown": 0, "duplicate": 3, "low_similarity": 278,
-  "disorder": 22, "foreign_subject": 5, "anchor_rows": [], "season_rows": [],
+  "disorder": 22, "foreign_subject": 5, "anchor_rows": [], "season_rows": [], "span_rows": [],
   "duplicate_series": [
     {"name": "间谍过家家",
      "paths": ["/strm/Anime/…/间谍过家家 (2022)", "/hdd/Anime/间谍过家家 (2022)"]}

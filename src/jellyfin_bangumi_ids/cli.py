@@ -109,7 +109,7 @@ def cmd_anchor(args: argparse.Namespace) -> int:
             print("--seasons needs --series NAME or --all", file=sys.stderr)
             return 2
         run_seasons(jf, bgm, name=args.series, library=args.library, all_series=args.all,
-                    dry_run=args.dry_run, force=args.force,
+                    dry_run=args.dry_run, force=args.force, clear_spans=args.clear_spans,
                     backup_path=None if args.no_backup else args.backup)
         return 0
     if not args.series:
@@ -265,6 +265,8 @@ def build_parser() -> argparse.ArgumentParser:
                    help="repair season-level ids from the ids on their episodes")
     p.add_argument("--all", action="store_true",
                    help="with --seasons: every series in the library")
+    p.add_argument("--clear-spans", action="store_true",
+                   help="with --seasons: clear the id of a season that spans two subjects")
     p.set_defaults(func=cmd_anchor)
 
     p = sub.add_parser("apply", help="write the ids from a scan report")

@@ -735,6 +735,25 @@ def run_specials(jf, bgm, library=None, limit=None, verbose=False,
     return report
 
 
+def spanning_seasons(votes: Dict[int, "Counter[int]"]):
+    """Season indexes whose episodes point at more than one subject.
+
+    No single season-level id can describe such a season: whichever one is stored,
+    episodes of the other subject report the wrong subject on playback.
+    """
+    out = set()
+    for index, counter in votes.items():
+        if len([1 for subject, count in counter.items() if subject and count >= 2]) > 1:
+            out.add(index)
+    return out
+
+
+def _spans(issue: Dict[str, Any]) -> bool:
+    """True when the season's episodes point at more than one subject."""
+    votes = issue.get("votes") or {}
+    return len([1 for subject, count in votes.items() if subject and count >= 2]) > 1
+
+
 def season_id_issues(seasons: List[Dict[str, Any]],
                      votes: Dict[int, "Counter[int]"]) -> List[Dict[str, Any]]:
     """Seasons whose stored Bangumi id disagrees with the ids on their episodes.
@@ -791,7 +810,12 @@ def run_scan(jf, bgm, library: Optional[str] = None, limit: Optional[int] = None
         "series_ok": len(ok),
         "series_review": len(report["series"]) - len(ok),
         "episodes_to_write": sum(e.get("to_write", 0) for e in ok),
-        "season_mismatch": sum(len(e.get("season_issues") or []) for e in report["series"]),
+        "season_mismatch": sum(1 for e in report["series"]
+                               for issue in e.get("season_issues") or []
+                               if not _spans(issue)),
+        "season_spans": sum(1 for e in report["series"]
+                            for issue in e.get("season_issues") or []
+                            if _spans(issue)),
     }
     with open(out, "w", encoding="utf-8") as fh:
         json.dump(report, fh, ensure_ascii=False, indent=1)

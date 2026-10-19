@@ -9,6 +9,7 @@ from collections import Counter
 
 from jellyfin_bangumi_ids.anchor import run_seasons
 from jellyfin_bangumi_ids.scan import season_id_issues
+from jellyfin_bangumi_ids.verify import episode_season, season_index_map
 
 
 def season(index, item_id, pid=None, name=None):
@@ -131,3 +132,60 @@ class RunSeasonsTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+class EpisodeSeasonTest(unittest.TestCase):
+    """Jellyfin may leave ParentIndexNumber at 1 for every season of a show."""
+
+    def test_season_id_wins_over_parent_index(self):
+        season_ix = season_index_map([season(1, "se1"), season(2, "se2")])
+        ep = {"Id": "e13", "SeasonId": "se2", "ParentIndexNumber": 1}
+        self.assertEqual(episode_season(ep, season_ix), 2)
+
+    def test_unknown_season_id_falls_back_to_parent_index(self):
+        self.assertEqual(episode_season({"ParentIndexNumber": 3}, {}), 3)
+
+    def test_two_seasons_with_same_parent_index_are_kept_apart(self):
+        seasons = [season(1, "se1", 100), season(2, "se2", 200)]
+        season_ix = season_index_map(seasons)
+        eps = [
+            {"Id": "e1", "SeasonId": "se1", "ParentIndexNumber": 1, "ProviderIds": {"Bangumi": "11"}},
+            {"Id": "e2", "SeasonId": "se2", "ParentIndexNumber": 1, "ProviderIds": {"Bangumi": "22"}},
+        ]
+        votes = {}
+        for ep in eps:
+            votes.setdefault(episode_season(ep, season_ix), Counter())[
+                100 if ep["SeasonId"] == "se1" else 200] += 1
+        self.assertEqual(season_id_issues(seasons, votes), [])
+
+
+class ClearSpanningTest(unittest.TestCase):
+    """A local season spanning two subjects cannot carry one right id."""
+
+    def make(self):
+        seasons = [season(1, "se1", 100)]
+        episodes = {"se1": [episode("e1", 11), episode("e2", 22), episode("e3", 33)]}
+        jf = FakeJellyfin(seasons, episodes)
+        bgm = FakeBangumi({11: 100, 22: 200, 33: 200})
+        return jf, bgm
+
+    def test_clear_spans_clears_the_stored_id(self):
+        jf, bgm = self.make()
+        out = run_seasons(jf, bgm, name="某动画", clear_spans=True, backup_path=None)
+        self.assertEqual(jf.writes, [("se1", "Bangumi", None)])
+        self.assertEqual(out["fixed"], 1)
+
+    def test_without_clear_spans_a_spanning_season_keeps_its_id(self):
+        seasons = [season(1, "se1", 100)]
+        episodes = {"se1": [episode("e1", 11), episode("e2", 22),
+                            episode("e3", 33), episode("e4", 44)]}
+        jf = FakeJellyfin(seasons, episodes)
+        bgm = FakeBangumi({11: 100, 22: 200, 33: 200, 44: 300})
+        run_seasons(jf, bgm, name="某动画", backup_path=None)
+        self.assertEqual(jf.writes, [])
+
+    def test_single_subject_season_is_not_cleared(self):
+        seasons = [season(1, "se1", 100)]
+        jf = FakeJellyfin(seasons, {"se1": [episode("e1", 11)]})
+        bgm = FakeBangumi({11: 100})
+        run_seasons(jf, bgm, name="某动画", clear_spans=True, backup_path=None)
+        self.assertEqual(jf.writes, [])

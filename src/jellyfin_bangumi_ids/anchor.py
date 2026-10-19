@@ -98,18 +98,46 @@ def season_votes(bgm, jf, series: Dict[str, Any]) -> Dict[int, "Counter[int]"]:
 
 
 def season_report(bgm, jf, series: Dict[str, Any]) -> List[Dict[str, Any]]:
-    """Seasons whose stored id is not the one their episodes point at."""
-    issues = season_id_issues(jf.seasons(series["Id"]), season_votes(bgm, jf, series))
+    """Seasons whose stored id is off, plus seasons that span two subjects."""
+    seasons = jf.seasons(series["Id"])
+    votes = season_votes(bgm, jf, series)
+    issues = season_id_issues(seasons, votes)
+    for issue in issues:
+        issue["mismatch"] = True
+
+    # A season that carries two subjects cannot report both from one id, even when
+    # its stored id happens to be the majority one.
+    seen = set(issue["season"] for issue in issues)
+    by_index = {}
+    for season in seasons:
+        by_index[season.get("IndexNumber") or 0] = season
+    for index, counter in votes.items():
+        if index in seen:
+            continue
+        big = [subject for subject, count in counter.items() if count >= 2]
+        total = sum(counter.values())
+        if len(big) < 2:
+            continue
+        season = by_index.get(index, {})
+        current = (season.get("ProviderIds") or {}).get("Bangumi")
+        top = counter.most_common(1)[0]
+        issues.append({"season": index, "season_id": season.get("Id"),
+                       "name": season.get("Name"), "current": current,
+                       "expected": top[0], "votes": dict(counter),
+                       "count": top[1], "total": total, "mismatch": False})
+
     for issue in issues:
         issue["series"] = series["Name"]
         issue["series_id"] = series["Id"]
         issue["confident"] = issue["total"] >= 2 and issue["count"] / float(issue["total"]) >= 0.6
+        issue["subjects"] = issue["votes"]
+        issue["spanning"] = len([k for k, v in issue["votes"].items() if v]) > 1
     return issues
 
 
 def run_seasons(jf, bgm, name: Optional[str] = None, library: Optional[str] = None,
                 all_series: bool = False, dry_run: bool = False, force: bool = False,
-                backup_path: Optional[str] = None) -> Dict[str, Any]:
+                clear_spans: bool = False, backup_path: Optional[str] = None) -> Dict[str, Any]:
     """Repair season-level Bangumi ids from the ids on their own episodes.
 
     This is the check that catches the failure the plugin cannot: episode ids can be
@@ -129,19 +157,23 @@ def run_seasons(jf, bgm, name: Optional[str] = None, library: Optional[str] = No
             continue
         log("%s" % series["Name"])
         for issue in issues:
+            if clear_spans and issue.get("spanning"):
+                target, verdict = None, " [clear: spanning season]"
+            else:
+                target, verdict = issue["expected"], "" if issue["confident"] else " [low confidence]"
             log("  season %-3s id %-8s -> %-8s (%d/%d episodes)%s"
-                % (issue["season"], issue["current"] or "(none)", issue["expected"],
-                   issue["count"], issue["total"], "" if issue["confident"] else " [low confidence]"))
-            if dry_run or not (issue["confident"] or force):
+                % (issue["season"], issue["current"] or "(none)", target or "(cleared)",
+                   issue["count"], issue["total"], verdict))
+            if dry_run or not (issue["confident"] or force or target is None):
                 continue
-            result = jf.set_provider_id(issue["season_id"], "Bangumi", issue["expected"])
+            result = jf.set_provider_id(issue["season_id"], "Bangumi", target)
             issue["write"] = {"ok": result["ok"], "after": result["after"],
                               "collateral": result["collateral"]}
             if result["ok"]:
                 out["fixed"] += 1
                 written.append({"item_id": issue["season_id"], "kind": "season",
                                 "series": series["Name"], "season": issue["season"],
-                                "old": issue["current"], "new": issue["expected"]})
+                                "old": issue["current"], "new": target})
             else:
                 log("  ! write failed, still %s" % result["after"])
     if backup_path and written:
