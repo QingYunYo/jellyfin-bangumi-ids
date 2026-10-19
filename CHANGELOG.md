@@ -20,7 +20,9 @@
   `report subject #525565` 变为 `report subject #638497`。本库清掉 7 个横跨季（86、间谍过家家、进击的巨人、
   无职转生 S1/S2、葬送的芙莉莲、Re:从零、赛马娘 芦毛灰姑娘、物语 S12 等，备份可 `rollback`）。
 - `verify` 增加 `season_rows`（季级 ID 与集级多数票不一致的季）与终端计数 `season-ids`；新增 `span_rows`
-  与 `season-spans`（横跨两个条目、仍写着季级 ID 的季），清空后本库从 `season-ids 6` 降到 `season-ids 1`。
+  与 `season-spans`（横跨两个条目、仍写着季级 ID 的季），清空后本库从 `season-ids 6` 降到 `0`。
+- `--force` 不会给横跨两个条目的季写多数票（跳过），避免把刚清空的那一半写回去；单集季仍可用
+  `--force` 补上 ID（本库「愚物语」S14 用此法补成 `475354`）。
 - `scan` 的 summary 增加 `season_mismatch`，命中时在 `notes` 里写明「季级 ID -> 期望值」。
 - 文档重排（只改文档，不动代码）：中文 README 改成 1–16 章的四级标题结构，章首加目录锚点；
   「模式详解」的七个模式各自展开为 7.1–7.7，每个模式都附真实输入与终端输出，并在合适位置给出

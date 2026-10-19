@@ -131,7 +131,7 @@ def season_report(bgm, jf, series: Dict[str, Any]) -> List[Dict[str, Any]]:
         issue["series_id"] = series["Id"]
         issue["confident"] = issue["total"] >= 2 and issue["count"] / float(issue["total"]) >= 0.6
         issue["subjects"] = issue["votes"]
-        issue["spanning"] = len([k for k, v in issue["votes"].items() if v]) > 1
+        issue["spanning"] = len([k for k, v in issue["votes"].items() if k and v >= 2]) > 1
     return issues
 
 
@@ -157,8 +157,15 @@ def run_seasons(jf, bgm, name: Optional[str] = None, library: Optional[str] = No
             continue
         log("%s" % series["Name"])
         for issue in issues:
-            if clear_spans and issue.get("spanning"):
-                target, verdict = None, " [clear: spanning season]"
+            if issue.get("spanning"):
+                # A majority vote is not authoritative when the season covers two
+                # subjects: writing it is what breaks the other half.
+                target = None if clear_spans else issue["expected"]
+                verdict = " [clear: spanning season]" if clear_spans else " [spans two subjects, skip]"
+                if not clear_spans:
+                    log("  season %-3s id %-8s spans two subjects, skipped"
+                        % (issue["season"], issue["current"] or "(none)"))
+                    continue
             else:
                 target, verdict = issue["expected"], "" if issue["confident"] else " [low confidence]"
             log("  season %-3s id %-8s -> %-8s (%d/%d episodes)%s"

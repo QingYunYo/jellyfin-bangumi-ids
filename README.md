@@ -457,7 +457,8 @@ $ jbmid anchor --library 动漫 --seasons --all --dry-run
 37 season id(s) off, 0 written (dry run)
 ```
 
-只写「票数 ≥ 60% 且至少 2 集」的季；其余只报告（`--force` 强制）。
+只写「票数 ≥ 60% 且至少 2 集」的季；其余只报告，`--force` 才会写——但 `--force` 也**不会**给横跨
+两个条目的季写多数票（直接跳过），否则会把刚清掉的那一半再次写坏。
 
 **一个本地季横跨两个 Bangumi 条目时，不存在唯一正确的季级 ID**：写哪个，另一半集都会被报成隔壁条目
 （86 的第一季 = 两个 part，无职转生的第一季同理）。这类季用 `--clear-spans` 清空季级 ID——清空后
@@ -506,7 +507,7 @@ jbmid verify --library 动漫 --archive /path/to/bangumi/archive --out check.jso
 ```text
 $ jbmid verify --library 动漫
 data source    : offline archive /path/to/bangumi/archive
-offline check: 2095 ids | unknown 0 | dup 3 | low-sim 278 | disorder 22 | foreign 5 | anchors 0 | season-ids 1 | season-spans 0
+offline check: 2095 ids | unknown 0 | dup 3 | low-sim 278 | disorder 22 | foreign 5 | anchors 0 | season-ids 0 | season-spans 0
 ```
 
 `check.json` 里除了这些计数，还分门别类列了明细：`season_rows` 是季级 ID 与它集级 ID 多数票不一致的季

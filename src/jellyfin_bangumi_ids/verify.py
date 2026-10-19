@@ -216,7 +216,7 @@ def run_verify_offline(jf, archive_dir: str, library: Optional[str] = None,
     report = {"checked": checked, "unknown": unknown, "duplicate": dup,
               "low_similarity": low, "foreign_subject": foreign, "disorder": disorder,
               "threshold": threshold, "anchor_rows": anchor_rows, "season_rows": season_rows,
-              "duplicate_series": duplicate_series, "rows": rows,
+              "span_rows": span_rows, "duplicate_series": duplicate_series, "rows": rows,
               "subjects": sorted(x for x in used_subjects if x)}
     with open(out, "w", encoding="utf-8") as fh:
         json.dump(report, fh, ensure_ascii=False, indent=1)

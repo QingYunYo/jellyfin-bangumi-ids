@@ -162,10 +162,11 @@ class ClearSpanningTest(unittest.TestCase):
     """A local season spanning two subjects cannot carry one right id."""
 
     def make(self):
-        seasons = [season(1, "se1", 100)]
-        episodes = {"se1": [episode("e1", 11), episode("e2", 22), episode("e3", 33)]}
+        seasons = [season(1, "se1", 9)]
+        episodes = {"se1": [episode("e1", 11), episode("e2", 22),
+                            episode("e3", 33), episode("e4", 44)]}
         jf = FakeJellyfin(seasons, episodes)
-        bgm = FakeBangumi({11: 100, 22: 200, 33: 200})
+        bgm = FakeBangumi({11: 100, 22: 100, 33: 200, 44: 200})
         return jf, bgm
 
     def test_clear_spans_clears_the_stored_id(self):
@@ -182,6 +183,12 @@ class ClearSpanningTest(unittest.TestCase):
         bgm = FakeBangumi({11: 100, 22: 200, 33: 200, 44: 300})
         run_seasons(jf, bgm, name="某动画", backup_path=None)
         self.assertEqual(jf.writes, [])
+
+    def test_force_does_not_write_a_spanning_season(self):
+        jf, bgm = self.make()
+        out = run_seasons(jf, bgm, name="某动画", force=True, backup_path=None)
+        self.assertEqual(jf.writes, [])
+        self.assertEqual(out["fixed"], 0)
 
     def test_single_subject_season_is_not_cleared(self):
         seasons = [season(1, "se1", 100)]

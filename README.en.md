@@ -497,7 +497,8 @@ $ jbmid anchor --library 动漫 --seasons --all --dry-run
 ```
 
 Only seasons with a vote share of at least 60% and at least 2 episodes are written; the rest are
-reported (`--force` overrides).
+reported and only written with `--force` -- which still **never** writes a majority vote onto a season
+that spans two subjects (it skips them), since that would re-break the half you just cleared.
 
 **A local season that spans two Bangumi subjects has no single right ID.** Whichever one is stored,
 episodes of the other subject report the neighbouring entry (86 season 1 is two parts; so is
@@ -550,7 +551,7 @@ Report excerpt: [`examples/verify-report.json`](examples/verify-report.json).
 ```text
 $ jbmid verify --library 动漫
 data source    : offline archive /path/to/bangumi/archive
-offline check: 2095 ids | unknown 0 | dup 3 | low-sim 278 | disorder 22 | foreign 5 | anchors 0 | season-ids 1 | season-spans 0
+offline check: 2095 ids | unknown 0 | dup 3 | low-sim 278 | disorder 22 | foreign 5 | anchors 0 | season-ids 0 | season-spans 0
 ```
 
 Besides those counters, `check.json` lists the details per category: `season_rows` holds seasons whose
