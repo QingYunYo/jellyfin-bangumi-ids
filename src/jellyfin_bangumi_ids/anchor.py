@@ -77,7 +77,7 @@ def run_anchor(jf, bgm, name: str, library: Optional[str] = None,
 
 
 def season_votes(bgm, jf, series: Dict[str, Any]) -> Dict[int, "Counter[int]"]:
-    """Vote每个季的条目归属 by the Bangumi ids already stored on its episodes."""
+    """Vote each season's subject by the Bangumi ids already stored on its episodes."""
     votes: Dict[int, "Counter[int]"] = {}
     for season in jf.seasons(series["Id"]):
         index = season.get("IndexNumber") or 0
