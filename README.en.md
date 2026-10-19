@@ -13,7 +13,7 @@ video files, never other metadata.
 - [1. Two kinds of ID](#1-two-kinds-of-id)
 - [2. Install and API key](#2-install-and-api-key)
 - [3. Quick start](#3-quick-start)
-- [4. The seven modes](#4-the-seven-modes)
+- [4. Modes and usage](#4-modes-and-usage)
 - [5. Season IDs: why they have to be fixed too](#5-season-ids-why-they-have-to-be-fixed-too)
 - [6. Speeding up with the offline archive](#6-speeding-up-with-the-offline-archive)
 - [7. Safety](#7-safety)
@@ -120,38 +120,113 @@ Three numbers: `series ok` aligned, `series review` uncertain (**not written**, 
 `episodes to write` how many episodes change. Each series in the report carries `anchor` / `chain` /
 `notes`; reviews explain themselves (e.g. `size mismatch 25 local vs 51 pool`).
 
-## 4. The seven modes
+## 4. Modes and usage
 
-| Mode | When | Writes? |
-| --- | --- | --- |
-| `scan` + `apply` | mostly clean library, a few shows off | report → `apply` writes |
-| `season` | Bangumi's seasons don't line up with your folders | writes (has `--dry-run`) |
-| `auto` | one shot: find subjects by title, align by name | writes (has `--dry-run`) |
-| `special` | fix SP / OVA / specials too | report → `apply` writes |
-| `anchor` | a show's anchor itself is wrong (including season IDs) | writes (has `--dry-run`) |
-| `verify` | audit before/after | read-only |
-| `protect` | stop the plugin from overwriting your IDs | plugin setting |
+One table first. The only hard rule for picking a mode is **whether it writes** — when in doubt, add
+`--dry-run`.
 
-**`season`**: when the number of local seasons differs from the chain, or the order is off, say
-"season N = these subjects" by hand:
+| Mode | What it does | Input | Writes? |
+| --- | --- | --- | --- |
+| `scan` | find anchors, align the whole library by episode title | `--library` | report only |
+| `apply` | write a `scan` / `special` report into Jellyfin | report JSON | writes (`--dry-run`) |
+| `season` | declare "season N = these subjects" by hand | `--map` JSON | writes (`--dry-run`) |
+| `auto` | find subjects by title + align by episode name, one shot | `--library` | writes (`--dry-run`) |
+| `special` | fix Season 0 / specials / OVA | `--library` | report only |
+| `anchor` | repair a show's series-level / season-level ID | `--series` or `--library` | writes (`--dry-run`) |
+| `verify` | audit episode and season IDs | `--library` | read-only |
+| `protect` | stop the plugin from overwriting hand-written IDs | — | plugin setting |
+| `rollback` | restore from a backup | backup JSON | writes |
+| `doctor` | connectivity / data source / plugin state | — | read-only |
+
+### 4.1 `scan`: look before you leap
+
+The usual entry point: for every show it finds an anchor, builds a pool, aligns by episode title and
+decides — **without writing anything**.
+
+```bash
+jbmid scan --library Anime --out report.json   # whole library
+jbmid scan --library Anime --limit 3            # try three shows first
+```
+
+Read the `reason` of every `series review`, then run `jbmid apply report.json`.
+
+### 4.2 `apply` / `rollback`: land the report, or undo it
+
+```bash
+jbmid apply report.json --dry-run                 # how many episodes would change
+jbmid apply report.json --backup jbmid-backup.json
+jbmid rollback jbmid-backup.json --dry-run
+```
+
+`apply` writes only episodes whose value actually changes; `rollback` restores row by row. Both support
+`--dry-run`.
+
+### 4.3 `season`: when Bangumi's seasons don't line up
+
+Use it when the number of local seasons differs from the chain, or the order is off. The JSON says
+"season N = these subjects":
 
 ```json
-{"物语系列": {"1": {"subjects": [140001]}, "12": {"subjects": [138829]},
-            "14": {"subjects": [475354], "sp": true}}}
+{"物语系列": {"1": {"subjects": [140001]}, "14": {"subjects": [475354], "sp": true}}}
 ```
 
 ```bash
 jbmid season --map map.json --dry-run
 ```
 
-**`special`**: Season 0 and episodes whose title contains `番外|OVA|OAD|SP|总集篇|特典`, matched against
-Bangumi `type=1` episodes. `--clear-borrowed` clears specials that borrowed a regular episode's ID.
+`sp: true` treats that season as specials (aligns against Bangumi `type=1` episodes).
 
-**`anchor`**: repin one show. Order: **episode-parent → season-ID vote → the series' own ID → title search**;
-whatever comes back must pass a title check, `--force` accepts dubious values, `--clear` removes them.
+### 4.4 `auto`: the one-shot
 
-**`verify`**: see [chapter 5](#5-season-ids-why-they-have-to-be-fixed-too). **`protect`**: sets the plugin's
-`TrustExistedBangumiId` to `true` so metadata refreshes stop overwriting hand-written IDs.
+No anchor given: it searches subjects by title, aligns by episode name and writes:
+
+```bash
+jbmid auto --library Anime --dry-run
+jbmid auto --library Anime
+```
+
+Easiest to run, and the mode most worth reading: every show prints its `method`
+(`name` / `season-map` / `stored` / `order`).
+
+### 4.5 `special`: specials, OVA, recaps
+
+Season 0 and episodes containing `番外|OVA|OAD|SP|总集篇|特典` are aligned against Bangumi `type=1`
+episodes:
+
+```bash
+jbmid special --library Anime --out specials.json
+jbmid apply specials.json
+jbmid special --library Anime --clear-borrowed   # clear specials that borrowed a regular episode ID
+```
+
+### 4.6 `anchor`: the anchor itself is wrong
+
+Repins a single show, and repairs season-level IDs:
+
+```bash
+jbmid anchor --series 物语系列 --dry-run                     # repin the series-level anchor
+jbmid anchor --library Anime --seasons --all                 # repair season IDs
+jbmid anchor --library Anime --seasons --all --clear-spans   # clear seasons that span entries
+```
+
+Lookup order: **episode-parent → season-ID vote → the series' own ID → title search**, all behind a title
+check; `--force` accepts dubious values, `--clear` removes them.
+
+### 4.7 `verify`: the read-only audit
+
+```bash
+jbmid verify --library Anime
+```
+
+One summary line plus category detail; field meanings are in
+[chapter 5](#5-season-ids-why-they-have-to-be-fixed-too).
+
+### 4.8 `protect` / `doctor`
+
+```bash
+jbmid protect     # sets TrustExistedBangumiId = True so refreshes stop overwriting
+jbmid doctor      # connectivity / data source / plugin state
+```
 
 Every sample output in both READMEs comes from `examples/` (real reports and backups, trimmed).
 

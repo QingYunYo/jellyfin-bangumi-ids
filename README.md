@@ -12,7 +12,7 @@
 - [1. 它改什么：两类 ID](#1-它改什么两类-id)
 - [2. 安装与 API Key](#2-安装与-api-key)
 - [3. 快速开始](#3-快速开始)
-- [4. 七个模式](#4-七个模式)
+- [4. 模式与用法](#4-模式与用法)
 - [5. 季级 ID：为什么必须一起修](#5-季级-id为什么必须一起修)
 - [6. 用离线档案提速](#6-用离线档案提速)
 - [7. 安全性](#7-安全性)
@@ -115,37 +115,106 @@ episodes       : 0 to write
 三个数字：`series ok` 可以对齐、`series review` 不确定（**不写**，看 `reason`）、`episodes to write` 要改的集数。
 报告里每部剧带 `anchor` / `chain` / `notes`，`review` 的会写明原因（如 `size mismatch 25 local vs 51 pool`）。
 
-## 4. 七个模式
+## 4. 模式与用法
 
-| 模式 | 何时用 | 写不写 |
-| --- | --- | --- |
-| `scan` + `apply` | 大部分番是干净的，只有零星几部不对 | 报告 → `apply` 才写 |
-| `season` | Bangumi 的季划分和文件夹对不上，需要指定 | 直接写（可 `--dry-run`） |
-| `auto` | 想一把梭：按标题找条目、按集名对齐 | 直接写（可 `--dry-run`） |
-| `special` | 番外 / SP / OVA / 总集篇也要同步 | 报告 → `apply` 才写 |
-| `anchor` | 某部剧的锚点本身就错（含季级 ID） | 直接写（可 `--dry-run`） |
-| `verify` | 修前修后体检 | 只读 |
-| `protect` | 改完别被插件刷新覆盖 | 改插件设置 |
+先看一张表。选模式的唯一硬标准是**写不写**——拿不准就加 `--dry-run`。
 
-**`season`**：本地季数 ≠ 链上条目数、或顺序对不上时，手工指定「第几季 = 哪几个 subject」：
+| 模式 | 干什么 | 输入 | 写不写 |
+| --- | --- | --- | --- |
+| `scan` | 自动找锚点、按集名对齐整库 | `--library` | 只出报告 |
+| `apply` | 把 `scan` / `special` 的报告写进 Jellyfin | 报告 JSON | 写（有 `--dry-run`） |
+| `season` | 手工指定「第几季 = 哪几个 subject」 | `--map` JSON | 写（有 `--dry-run`） |
+| `auto` | 按标题找条目 + 按集名对齐，一把梭 | `--library` | 写（有 `--dry-run`） |
+| `special` | 修 Season 0 / 番外 / OVA | `--library` | 只出报告 |
+| `anchor` | 修某部剧的剧集级 / 季级 ID | `--series` 或 `--library` | 写（有 `--dry-run`） |
+| `verify` | 体检：集级、季级 ID 对不对 | `--library` | 只读 |
+| `protect` | 让插件别覆盖手写 ID | — | 改插件配置 |
+| `rollback` | 按备份还原 | 备份 JSON | 写 |
+| `doctor` | 连通性 / 数据源 / 插件状态 | — | 只读 |
+
+### 4.1 `scan`：先看清全局，再动手
+
+最常用的入口：逐部剧找锚点、建池、按集名对齐、给出判定，**一个字都不写**。
+
+```bash
+jbmid scan --library 动漫 --out report.json   # 全库
+jbmid scan --library 动漫 --limit 3            # 先试 3 部
+```
+
+看 `series review` 的原因，确认无误后再 `jbmid apply report.json`。
+
+### 4.2 `apply` / `rollback`：报告落库与撤销
+
+```bash
+jbmid apply report.json --dry-run                 # 先看要改多少集
+jbmid apply report.json --backup jbmid-backup.json
+jbmid rollback jbmid-backup.json --dry-run
+```
+
+`apply` 只写「新旧不同」的集；`rollback` 按备份逐条还原。两者都有 `--dry-run`。
+
+### 4.3 `season`：季划分对不上时
+
+本地季数 ≠ 链上条目数、或顺序不同时用。JSON 写「第几季 = 哪些 subject」：
 
 ```json
-{"物语系列": {"1": {"subjects": [140001]}, "12": {"subjects": [138829]},
-            "14": {"subjects": [475354], "sp": true}}}
+{"物语系列": {"1": {"subjects": [140001]}, "14": {"subjects": [475354], "sp": true}}}
 ```
 
 ```bash
 jbmid season --map map.json --dry-run
 ```
 
-**`special`**：Season 0 与名字含 `番外|OVA|OAD|SP|总集篇|特典` 的集，对齐 Bangumi 的 `type=1` 集。
-`--clear-borrowed` 会清掉「借用了正片 ID」的番外。
+`sp: true` 表示这一季按番外处理（对齐 Bangumi 的 `type=1` 集）。
 
-**`anchor`**：只改一部剧的锚点。取值顺序：**集级反查 → 季级 ID 多数票 → 剧集自己的 ID → 标题搜索**；
-拿到的 ID 还要过标题校验，`--force` 才接受可疑值，`--clear` 清空。
+### 4.4 `auto`：一把梭
 
-**`verify`**：见[第 5 章](#5-季级-id为什么必须一起修)。**`protect`**：把插件配置里的
-`TrustExistedBangumiId` 设为 `true`，刷新元数据时不再覆盖手写 ID。
+不指定锚点，按剧名搜条目、按集名对齐，然后直接写：
+
+```bash
+jbmid auto --library 动漫 --dry-run
+jbmid auto --library 动漫
+```
+
+它最省事，也最需要看结果：每部剧都会打印 `method`（`name` / `season-map` / `stored` / `order`）。
+
+### 4.5 `special`：番外、OVA、总集篇
+
+Season 0 和名字含 `番外|OVA|OAD|SP|总集篇|特典` 的集，对齐 Bangumi 的 `type=1` 集：
+
+```bash
+jbmid special --library 动漫 --out specials.json
+jbmid apply specials.json
+jbmid special --library 动漫 --clear-borrowed   # 清掉借用了正片 ID 的番外
+```
+
+### 4.6 `anchor`：锚点本身错了
+
+只修一部剧的锚点，也能修季级 ID：
+
+```bash
+jbmid anchor --series 物语系列 --dry-run                     # 换剧集级锚点
+jbmid anchor --library 动漫 --seasons --all                  # 修季级 ID
+jbmid anchor --library 动漫 --seasons --all --clear-spans    # 横跨季清空
+```
+
+取值顺序：**集级反查 → 季级多数票 → 剧集自己的 ID → 标题搜索**，都要过标题校验；`--force` 接收可疑值，
+`--clear` 清空。
+
+### 4.7 `verify`：只读体检
+
+```bash
+jbmid verify --library 动漫
+```
+
+一行汇总 + 分类明细，各字段含义见[第 5 章](#5-季级-id为什么必须一起修)。
+
+### 4.8 `protect` / `doctor`
+
+```bash
+jbmid protect     # 把 TrustExistedBangumiId 设为 True，刷新不再覆盖
+jbmid doctor      # 连通性 / 数据源 / 插件状态
+```
 
 两份 README 里的示例输出都来自 `examples/`（真实报告与备份的节选）。
 
