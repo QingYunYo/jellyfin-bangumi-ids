@@ -123,7 +123,8 @@ Three numbers: `series ok` aligned, `series review` uncertain (**not written**, 
 ## 4. Modes and usage
 
 One table first. The only hard rule for picking a mode is **whether it writes** — when in doubt, add
-`--dry-run`.
+`--dry-run`. Individual modes are 4.1–4.8; **[4.9](#49-putting-it-together-the-order-that-actually-works) is
+how to combine them on a real repair**.
 
 | Mode | What it does | Input | Writes? |
 | --- | --- | --- | --- |
@@ -229,6 +230,36 @@ jbmid doctor      # connectivity / data source / plugin state
 ```
 
 Every sample output in both READMEs comes from `examples/` (real reports and backups, trimmed).
+
+### 4.9 Putting it together: the order that actually works
+
+In practice these modes are **used together**, not one and done. On a first pass, walk this order:
+
+| Step | Command | Why it sits here |
+| --- | --- | --- |
+| 1 survey | `jbmid doctor` → `jbmid verify --library Anime` | confirm connectivity and the offline archive; `verify` gives the baseline (unknown / dup / disorder / season-ids) |
+| 2 episodes | `jbmid scan --library Anime --out report.json` → `jbmid apply report.json` | episode IDs feed the season vote, so they come first |
+| 3 seasons | `jbmid anchor --library Anime --seasons --all` (add `--clear-spans` for spanning seasons) | the majority vote reads the episode IDs written in step 2 |
+| 4 specials | `jbmid special --library Anime --out specials.json` → `jbmid apply specials.json` | specials that borrowed a regular ID pollute the pool, so they come after episodes are stable |
+| 5 re-audit | `jbmid verify --library Anime` | numbers should converge: `unknown 0`, `season-ids 0`, `season-spans 0` (`dup` only the duplicated entries themselves) |
+| 6 lock | `jbmid protect` | lock last; locking first also blocks your own later fixes |
+
+Four mixed scenarios:
+
+**A. Fresh library / big repair** (`verify` is all red) → steps 1 → 2 → 3 → 4 → 5 → 6, all of them.
+
+**B. Only a few shows are off** (`verify` numbers are small) → `scan` (use `--limit` if you like) → `apply` →
+read `anchor --seasons`, fix only the seasons it names → `verify`. Skip `special`.
+
+**C. Only specials are wrong** (episodes are fine) → `special --clear-borrowed` → `apply specials.json` →
+`verify`. Do not touch episode IDs.
+
+**D. One TMDB season = two Bangumi entries** → run `scan` first (it attempts season alignment); if it still
+reviews, pin the mapping with `season --map`; if a *single* local season spans two entries, clear it with
+`anchor --seasons --all --clear-spans` (clear, do not guess); finish with `verify`.
+
+Why the order cannot be reversed: **episodes → seasons** (the vote reads episode IDs), **episodes → specials**
+(borrowed IDs make the pool dirty), **fix → lock** (`protect` too early also blocks your own fixes).
 
 ## 5. Season IDs: why they have to be fixed too
 

@@ -117,7 +117,8 @@ episodes       : 0 to write
 
 ## 4. 模式与用法
 
-先看一张表。选模式的唯一硬标准是**写不写**——拿不准就加 `--dry-run`。
+先看一张表。选模式的唯一硬标准是**写不写**——拿不准就加 `--dry-run`。单个模式的用法见 4.1–4.8，
+**真实修复时几个模式怎么排顺序见 [4.9](#49-综合用法真实修复时的顺序)**。
 
 | 模式 | 干什么 | 输入 | 写不写 |
 | --- | --- | --- | --- |
@@ -217,6 +218,34 @@ jbmid doctor      # 连通性 / 数据源 / 插件状态
 ```
 
 两份 README 里的示例输出都来自 `examples/`（真实报告与备份的节选）。
+
+### 4.9 综合用法：真实修复时的顺序
+
+实际使用时这几个模式是**混着用**的，不是挑一个跑完就完事。第一次上手按这个顺序走一遍：
+
+| 步骤 | 命令 | 为什么排在这 |
+| --- | --- | --- |
+| 1 摸底 | `jbmid doctor` → `jbmid verify --library 动漫` | 先确认能连、有没有离线档案；`verify` 给出基线（unknown / dup / disorder / season-ids） |
+| 2 集级 | `jbmid scan --library 动漫 --out report.json` → `jbmid apply report.json` | 集级 ID 是季级投票的输入，必须先对 |
+| 3 季级 | `jbmid anchor --library 动漫 --seasons --all`（有横跨季再加 `--clear-spans`） | 多数票要读第 2 步写好的集级 ID |
+| 4 番外 | `jbmid special --library 动漫 --out specials.json` → `jbmid apply specials.json` | 番外借用正片 ID 会污染集级池，所以放在集级稳定之后 |
+| 5 复检 | `jbmid verify --library 动漫` | 指标应收敛：`unknown 0`、`season-ids 0`、`season-spans 0`（`dup` 只剩重复条目本身） |
+| 6 锁定 | `jbmid protect` | 最后再锁；先锁会让修复期间的手工调整也被挡住 |
+
+四个混合场景：
+
+**A. 新库 / 大修**（`verify` 一屏红）→ 1 → 2 → 3 → 4 → 5 → 6，全走。
+
+**B. 只有几部坏**（`verify` 数字很小）→ `scan`（必要时 `--limit`）→ `apply` → `anchor --seasons` 只看报告、
+只修提到的那几季 → `verify` 收尾。不必跑 `special`。
+
+**C. 只有番外不对**（正片都对）→ `special --clear-borrowed` → `apply specials.json` → `verify`。不碰集级。
+
+**D. TMDB 一季 = Bangumi 两个条目** → 先 `scan`（会自动做季级对齐）；仍 `review` 就用 `season --map` 指定；
+一个本地季横跨两条目则 `anchor --seasons --all --clear-spans`（清空，不要挑一个）；最后 `verify`。
+
+顺序不能反的三条原因：**集级 → 季级**（投票来源是集级 ID）、**集级 → 番外**（S0 借正片 ID 会让池不干净）、
+**修完 → 锁**（`protect` 锁早了会挡住你自己的后续修正）。
 
 ## 5. 季级 ID：为什么必须一起修
 
