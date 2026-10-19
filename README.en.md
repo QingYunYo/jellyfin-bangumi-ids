@@ -933,8 +933,8 @@ examples/          real output samples: report / backup / verify / specials / se
 # 2) run the tests
 python -m unittest discover -s tests
 # 3) commit and tag
-git commit -am "chore: release v0.1.2"
-git tag -a v0.1.2 -m "v0.1.2"
+git commit -am "chore: release v0.1.3"
+git tag -a v0.1.3 -m "v0.1.3"
 git push origin main --tags
 # 4) create a release from the tag on GitHub (attach the wheel)
 python -m pip wheel . --no-deps -w dist
