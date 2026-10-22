@@ -156,11 +156,19 @@ Read the `reason` of every `series review`, then run `jbmid apply report.json`.
 ```bash
 jbmid apply report.json --dry-run                 # how many episodes would change
 jbmid apply report.json --backup jbmid-backup.json
+jbmid apply report.json --backup b.json --refresh # also refresh the touched items
 jbmid rollback jbmid-backup.json --dry-run
 ```
 
 `apply` writes only episodes whose value actually changes; `rollback` restores row by row. Both support
 `--dry-run`.
+
+`--refresh` asks Jellyfin to refresh **only the items whose id just changed**
+(`POST /Items/{id}/Refresh`), so the Bangumi plugin rewrites the fields it owns (such as
+`OriginalTitle`) from the new episode. Omit it and nothing is refreshed. Measured on a season that had
+been mapped to the previous season's episodes: the refresh changed `OriginalTitle` from the old
+season's title to the correct one and left `Name` / `Overview` / `PremiereDate` untouched; locked
+fields are never overwritten. `season` and `auto` accept `--refresh` too.
 
 ### 4.3 `season`: when Bangumi's seasons don't line up
 

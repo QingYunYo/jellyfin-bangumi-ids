@@ -126,7 +126,7 @@ def cmd_apply(args: argparse.Namespace) -> int:
     with open(args.report, encoding="utf-8") as fh:
         report = json.load(fh)
     apply_report(jf, report, backup_path=None if args.no_backup else args.backup,
-                 dry_run=args.dry_run, only=args.only)
+                 dry_run=args.dry_run, only=args.only, refresh=args.refresh)
     return 0
 
 
@@ -141,7 +141,7 @@ def cmd_season(args: argparse.Namespace) -> int:
     if not ok:
         return 1
     apply_report(jf, {"series": ok}, backup_path=None if args.no_backup else args.backup,
-                 dry_run=args.dry_run)
+                 dry_run=args.dry_run, refresh=args.refresh)
     return 0
 
 
@@ -155,7 +155,7 @@ def cmd_auto(args: argparse.Namespace) -> int:
         len(ok), len(entries) - len(ok), sum(len(e["episodes"]) for e in ok)))
     if ok:
         apply_report(jf, {"series": ok}, backup_path=None if args.no_backup else args.backup,
-                     dry_run=args.dry_run)
+                     dry_run=args.dry_run, refresh=args.refresh)
     return 0
 
 
@@ -276,6 +276,9 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--no-backup", action="store_true")
     p.add_argument("--dry-run", action="store_true")
     p.add_argument("--only", help="only series whose name contains this")
+    p.add_argument("--refresh", action="store_true",
+                   help="after writing, ask Jellyfin to refresh the changed items "
+                        "so the plugin rewrites fields such as OriginalTitle")
     p.set_defaults(func=cmd_apply)
 
     p = sub.add_parser("season", help="map local seasons to Bangumi subjects by hand")
@@ -285,6 +288,8 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--backup", default="jbmid-backup-season.json")
     p.add_argument("--no-backup", action="store_true")
     p.add_argument("--dry-run", action="store_true")
+    p.add_argument("--refresh", action="store_true",
+                   help="after writing, refresh the changed items (see apply --refresh)")
     p.set_defaults(func=cmd_season)
 
     p = sub.add_parser("auto", help="find the subject by title and align by episode names")
@@ -296,6 +301,8 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--backup", default="jbmid-backup-auto.json")
     p.add_argument("--no-backup", action="store_true")
     p.add_argument("--dry-run", action="store_true")
+    p.add_argument("--refresh", action="store_true",
+                   help="after writing, refresh the changed items (see apply --refresh)")
     p.set_defaults(func=cmd_auto)
 
     p = sub.add_parser("verify", help="read-only check of every stored id")

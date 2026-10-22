@@ -149,10 +149,17 @@ jbmid scan --library 动漫 --limit 3            # 先试 3 部
 ```bash
 jbmid apply report.json --dry-run                 # 先看要改多少集
 jbmid apply report.json --backup jbmid-backup.json
+jbmid apply report.json --backup b.json --refresh # 写完顺便刷一次元数据
 jbmid rollback jbmid-backup.json --dry-run
 ```
 
 `apply` 只写「新旧不同」的集；`rollback` 按备份逐条还原。两者都有 `--dry-run`。
+
+`--refresh` 只对**这次真正改过 ID 的集**调 Jellyfin 的刷新（`POST /Items/{id}/Refresh`），
+让 Bangumi 插件按新 ID 重写它自己负责的字段（如 `OriginalTitle`）。不传就不刷。实测在
+「整季错挂上一季 ID」的场景里，刷新只把 `OriginalTitle` 从上一季的标题改成这一季的，
+`Name` / `Overview` / `PremiereDate` 不受影响；锁定字段也不会被覆盖。`season` / `auto` 同样接受
+`--refresh`。
 
 ### 4.3 `season`：季划分对不上时
 

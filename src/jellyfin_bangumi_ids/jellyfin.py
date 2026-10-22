@@ -158,6 +158,21 @@ class Jellyfin:
                 "before": before.get(provider), "after": after.get(provider),
                 "collateral": collateral}
 
+    def refresh_item(self, item_id: str, replace_all: bool = True) -> Dict[str, Any]:
+        """Ask Jellyfin to re-run its metadata providers for one item.
+
+        The Bangumi plugin writes fields such as ``OriginalTitle`` from the
+        episode it is mapped to, so a stale id leaves stale text behind.  A
+        refresh makes the plugin rewrite them from the now-correct episode;
+        Jellyfin keeps locked fields and still lets the other providers win
+        their own fields (e.g. TMDb keeps the localized ``Name``).
+        """
+        params = {"metadataRefreshMode": "FullRefresh", "imageRefreshMode": "None",
+                  "replaceAllMetadata": "true" if replace_all else "false"}
+        request(build_url(self.url, "/Items/%s/Refresh" % item_id, params),
+                headers=self._headers(), body=b"", method="POST", timeout=self.timeout)
+        return {"ok": True}
+
     # -- plugin configuration ---------------------------------------------
     def plugin_configuration(self) -> Dict[str, Any]:
         return self.get("/Plugins/%s/Configuration" % BANGUMI_PLUGIN_GUID) or {}

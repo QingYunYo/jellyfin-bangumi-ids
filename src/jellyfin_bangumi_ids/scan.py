@@ -823,7 +823,8 @@ def run_scan(jf, bgm, library: Optional[str] = None, limit: Optional[int] = None
 
 
 def apply_report(jf, report: Dict[str, Any], backup_path: Optional[str] = None,
-                 dry_run: bool = False, only: Optional[str] = None) -> List[Dict[str, Any]]:
+                 dry_run: bool = False, only: Optional[str] = None,
+                 refresh: bool = False) -> List[Dict[str, Any]]:
     entries = [e for e in report.get("series", []) if e.get("status") == OK]
     if only:
         entries = [e for e in entries if only in (e.get("series") or "")]
@@ -855,6 +856,16 @@ def apply_report(jf, report: Dict[str, Any], backup_path: Optional[str] = None,
         with open(backup_path, "w", encoding="utf-8") as fh:
             json.dump(backup, fh, ensure_ascii=False, indent=1)
     log("%s %d episodes" % ("would write" if dry_run else "wrote", written))
+    if refresh and not dry_run and backup:
+        refreshed, failed = 0, 0
+        for row in backup:
+            try:
+                jf.refresh_item(row["item_id"])
+                refreshed += 1
+            except Exception as exc:                     # noqa: BLE001 - report, keep going
+                failed += 1
+                log("  ! refresh failed: %s #%s (%s)" % (row.get("series"), row.get("index"), exc))
+        log("refreshed %d item(s)%s" % (refreshed, ", %d failed" % failed if failed else ""))
     return backup
 
 

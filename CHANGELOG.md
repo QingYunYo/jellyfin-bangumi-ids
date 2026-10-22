@@ -10,6 +10,13 @@
 
 因此 `0.1.1` 从未正式发布过，公开的版本序列是 `0.1.0` → `0.1.2` → `0.1.3`。从 `0.1.2` 起恢复按补丁号发布。
 
+## 未发布
+
+- `apply --refresh`（`season` / `auto` 同）：写完 ID 后，只对这次改过的集调用 Jellyfin 的
+  `POST /Items/{id}/Refresh`，让 Bangumi 插件按新 ID 重写它自己负责的字段。修好 ID 不等于修好
+  元数据：集名/简介来自 TMDb，标题（`OriginalTitle`）来自 Bangumi——ID 曾指向上一季时，标题会
+  停在上一季。实测刷新只改 `OriginalTitle`，`Name` / `Overview` / `PremiereDate` 不受影响。
+
 ## 0.1.3（2026-10-19）
 
 - `anchor --seasons`：按每个季的集级 ID 投票，修正**季级** Bangumi ID。Bangumi 插件上报「在看」
