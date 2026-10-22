@@ -117,8 +117,8 @@ episodes       : 0 to write
 
 ## 4. 模式与用法
 
-先看一张表。选模式的唯一硬标准是**写不写**——拿不准就加 `--dry-run`。单个模式的用法见 4.1–4.8，
-**真实修复时几个模式怎么排顺序见 [4.9](#49-综合用法真实修复时的顺序)**。
+先看一张表。选模式的唯一硬标准是**写不写**——拿不准就加 `--dry-run`。单个模式的用法见 4.1–4.9，
+**真实修复时几个模式怎么排顺序见 [4.10](#410-综合用法真实修复时的顺序)**。
 
 | 模式 | 干什么 | 输入 | 写不写 |
 | --- | --- | --- | --- |
@@ -127,6 +127,7 @@ episodes       : 0 to write
 | `season` | 手工指定「第几季 = 哪几个 subject」 | `--map` JSON | 写（有 `--dry-run`） |
 | `auto` | 按标题找条目 + 按集名对齐，一把梭 | `--library` | 写（有 `--dry-run`） |
 | `special` | 修 Season 0 / 番外 / OVA | `--library` | 只出报告 |
+| `sync` | 一条龙：scan → apply → 季级 → 番外 → verify | `--library` | 写（有 `--dry-run`） |
 | `anchor` | 修某部剧的剧集级 / 季级 ID | `--series` 或 `--library` | 写（有 `--dry-run`） |
 | `verify` | 体检：集级、季级 ID 对不对 | `--library` | 只读 |
 | `protect` | 让插件别覆盖手写 ID | — | 改插件配置 |
@@ -142,7 +143,18 @@ jbmid scan --library 动漫 --out report.json   # 全库
 jbmid scan --library 动漫 --limit 3            # 先试 3 部
 ```
 
+只想看一两部时用 `--series-id`（Jellyfin 条目 id，可重复）：
+
+```bash
+jbmid scan --series-id 9a63c5f950cf05e5ba3796722a403f27
+```
+
 看 `series review` 的原因，确认无误后再 `jbmid apply report.json`。
+
+整条链对不上时，`scan` 会退一步：某一季自己存的 Bangumi ID 如果通过标题校验、且集数也对得上，
+就先让那一季按自己的条目对齐，剩下的季继续走链，`notes` 里写
+`season 2 keeps its own subject 513878 (10/10 episodes)`。这条退路**只在整链失败时**启用——
+默认仍先整链，否则「一个季横跨两个条目」会被误拆成「这一季有自己的条目」。
 
 ### 4.2 `apply` / `rollback`：报告落库与撤销
 
@@ -212,10 +224,13 @@ jbmid anchor --library 动漫 --seasons --all --clear-spans    # 横跨季清空
 ### 4.7 `verify`：只读体检
 
 ```bash
-jbmid verify --library 动漫
+jbmid verify --library 动漫                              # 一行汇总 + 分类明细
+jbmid verify --library 动漫 --by-series                  # 按剧聚合，先修哪部一眼看到
+jbmid verify --library 动漫 --fail-on season-ids,dup     # 有命中就 exit 1（cron / CI 用）
 ```
 
-一行汇总 + 分类明细，各字段含义见[第 5 章](#5-季级-id为什么必须一起修)。
+各字段含义见[第 5 章](#5-季级-id为什么必须一起修)；`--fail-on` 可选 `unknown dup low-sim
+disorder foreign anchors season-ids season-spans none`。
 
 ### 4.8 `protect` / `doctor`
 
@@ -226,7 +241,21 @@ jbmid doctor      # 连通性 / 数据源 / 插件状态
 
 两份 README 里的示例输出都来自 [`examples/`](examples/README.md)（真实报告与备份的节选，附字段说明）。
 
-### 4.9 综合用法：真实修复时的顺序
+### 4.9 `sync`：一条龙
+
+把 4.10 那张顺序表里最常一起跑的五步串起来：`scan` → `apply` → `anchor --seasons` → `special` → `verify`。
+
+```bash
+jbmid sync --library 动漫 --dry-run              # 五步都只打印，一个字不写
+jbmid sync --library 动漫 --refresh              # 真跑，写完顺手刷新改过的集
+jbmid sync --series-id 9a63c5f950cf05e5ba3796722a403f27   # 只处理一部
+```
+
+只有 `scan` 判 `ok` 的集才会被写；某一步报错就停在那一步，不会带着半成品继续。`--stop-on-review`
+让 `scan` 一遇 `review` 就收工；`--fail-on season-ids,dup` 把最后的体检结论变成退出码，适合塞进
+cron / CI。`--backup-dir` 与 `--out-dir` 决定备份和中间报告放哪。
+
+### 4.10 综合用法：真实修复时的顺序
 
 实际使用时这几个模式是**混着用**的，不是挑一个跑完就完事。第一次上手按这个顺序走一遍：
 
@@ -385,14 +414,14 @@ ID 反查条目」，两边都对——第 1 章那段日志对照就是这个�
 ## 10. 开发
 
 ```bash
-PYTHONPATH=src python -m unittest discover -s tests   # 87 个用例，全部离线（未 pip install -e . 时）
+PYTHONPATH=src python -m unittest discover -s tests   # 132 个用例，全部离线（未 pip install -e . 时）
 ```
 
 CI 在 Python 3.8 / 3.10 / 3.12 上跑同一套测试。目录结构：
 
 ```text
 src/jellyfin_bangumi_ids/
-  cli.py       命令行入口（scan/apply/season/auto/special/anchor/verify/rollback/protect/doctor）
+  cli.py       命令行入口（scan/apply/season/auto/special/anchor/verify/sync/rollback/protect/doctor）
   jellyfin.py  Jellyfin 客户端（重试、ProviderIds 读改写）
   bangumi.py   Bangumi API v0 客户端
   offline.py   离线档案后端（只读 + 自动回退在线）
@@ -402,7 +431,8 @@ src/jellyfin_bangumi_ids/
   match.py     归一化、变体、相似度、保序 DP
   season.py    手工季节映射
   anchor.py    锚点修复（剧集级 / 季级）
-  verify.py    只读体检
+  verify.py    只读体检（--by-series / --fail-on）
+  sync.py      一条龙：scan → apply → 季级 → 番外 → verify
   transport.py HTTP、IPv4 强制、重试
 ```
 

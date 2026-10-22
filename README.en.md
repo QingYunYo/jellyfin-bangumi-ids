@@ -123,7 +123,7 @@ Three numbers: `series ok` aligned, `series review` uncertain (**not written**, 
 ## 4. Modes and usage
 
 One table first. The only hard rule for picking a mode is **whether it writes** — when in doubt, add
-`--dry-run`. Individual modes are 4.1–4.8; **[4.9](#49-putting-it-together-the-order-that-actually-works) is
+`--dry-run`. Individual modes are 4.1–4.9; **[4.10](#410-putting-it-together-the-order-that-actually-works) is
 how to combine them on a real repair**.
 
 | Mode | What it does | Input | Writes? |
@@ -133,6 +133,7 @@ how to combine them on a real repair**.
 | `season` | declare "season N = these subjects" by hand | `--map` JSON | writes (`--dry-run`) |
 | `auto` | find subjects by title + align by episode name, one shot | `--library` | writes (`--dry-run`) |
 | `special` | fix Season 0 / specials / OVA | `--library` | report only |
+| `sync` | one run: scan → apply → season ids → specials → verify | `--library` | writes (`--dry-run`) |
 | `anchor` | repair a show's series-level / season-level ID | `--series` or `--library` | writes (`--dry-run`) |
 | `verify` | audit episode and season IDs | `--library` | read-only |
 | `protect` | stop the plugin from overwriting hand-written IDs | — | plugin setting |
@@ -149,7 +150,20 @@ jbmid scan --library Anime --out report.json   # whole library
 jbmid scan --library Anime --limit 3            # try three shows first
 ```
 
+To look at just one or two shows, pass `--series-id` (a Jellyfin item id, repeatable):
+
+```bash
+jbmid scan --series-id 9a63c5f950cf05e5ba3796722a403f27
+```
+
 Read the `reason` of every `series review`, then run `jbmid apply report.json`.
+
+When the whole chain does not fit, `scan` takes one step back: a season that stores its own Bangumi id —
+one that passes the title check and whose subject has about as many episodes — is aligned against that
+subject first, while the other seasons still walk the chain (`notes` then say
+`season 2 keeps its own subject 513878 (10/10 episodes)`). This fallback is used **only after the plain
+chain failed**; by default the chain still decides, otherwise a season that legitimately spans two
+subjects would be split into "this season owns one subject".
 
 ### 4.2 `apply` / `rollback`: land the report, or undo it
 
@@ -224,11 +238,13 @@ check; `--force` accepts dubious values, `--clear` removes them.
 ### 4.7 `verify`: the read-only audit
 
 ```bash
-jbmid verify --library Anime
+jbmid verify --library Anime                          # one summary line + category detail
+jbmid verify --library Anime --by-series              # grouped per show: which one to fix first
+jbmid verify --library Anime --fail-on season-ids,dup # exit 1 on a hit (cron / CI)
 ```
 
-One summary line plus category detail; field meanings are in
-[chapter 5](#5-season-ids-why-they-have-to-be-fixed-too).
+Field meanings are in [chapter 5](#5-season-ids-why-they-have-to-be-fixed-too); `--fail-on` accepts
+`unknown dup low-sim disorder foreign anchors season-ids season-spans none`.
 
 ### 4.8 `protect` / `doctor`
 
@@ -239,7 +255,22 @@ jbmid doctor      # connectivity / data source / plugin state
 
 Every sample output in both READMEs comes from [`examples/`](examples/README.md) (real reports and backups, trimmed, with field notes).
 
-### 4.9 Putting it together: the order that actually works
+### 4.9 `sync`: the whole pipeline in one run
+
+It chains the five steps of the 4.10 table: `scan` → `apply` → `anchor --seasons` → `special` → `verify`.
+
+```bash
+jbmid sync --library Anime --dry-run              # prints every step, writes nothing
+jbmid sync --library Anime --refresh              # really run, refresh the touched items
+jbmid sync --series-id 9a63c5f950cf05e5ba3796722a403f27   # just one show
+```
+
+Only episodes that `scan` marked `ok` are written; a failing step stops the pipeline instead of carrying a
+half-applied state forward. `--stop-on-review` stops right after `scan` if anything needs review, and
+`--fail-on season-ids,dup` turns the final audit into an exit code for cron / CI. `--backup-dir` and
+`--out-dir` choose where backups and intermediate reports go.
+
+### 4.10 Putting it together: the order that actually works
 
 In practice these modes are **used together**, not one and done. On a first pass, walk this order:
 
@@ -414,14 +445,14 @@ movies.
 ## 10. Development
 
 ```bash
-PYTHONPATH=src python -m unittest discover -s tests   # 87 cases, fully offline (if not pip install -e .)
+PYTHONPATH=src python -m unittest discover -s tests   # 132 cases, fully offline (if not pip install -e .)
 ```
 
 CI runs the same suite on Python 3.8 / 3.10 / 3.12. Layout:
 
 ```text
 src/jellyfin_bangumi_ids/
-  cli.py       command line (scan/apply/season/auto/special/anchor/verify/rollback/protect/doctor)
+  cli.py       command line (scan/apply/season/auto/special/anchor/verify/sync/rollback/protect/doctor)
   jellyfin.py  Jellyfin client (retries, ProviderIds read-modify-write)
   bangumi.py   Bangumi API v0 client
   offline.py   offline archive backend (read-only, falls back online)
@@ -431,7 +462,8 @@ src/jellyfin_bangumi_ids/
   match.py     normalization, variants, similarity, order-preserving DP
   season.py    manual season maps
   anchor.py    anchor repair (series-level / season-level)
-  verify.py    read-only audit
+  verify.py    read-only audit (--by-series / --fail-on)
+  sync.py      one-shot pipeline: scan → apply → seasons → specials → verify
   transport.py HTTP, forced IPv4, retries
 ```
 

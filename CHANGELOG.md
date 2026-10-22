@@ -10,8 +10,25 @@
 
 因此 `0.1.1` 从未正式发布过，公开的版本序列是 `0.1.0` → `0.1.2` → `0.1.3`。从 `0.1.2` 起恢复按补丁号发布。
 
-## 未发布
+## 0.1.4（未发布）
 
+- **按季拆段只在整链失败时启用**：早先的版本无条件相信「季自己存的 Bangumi ID」并按季拆段，
+  遇到「一个本地季横跨两个条目」就会把季拆错（药屋少女 S1 48 集被拆成 25+23，`scan` 从 `ok` 变
+  `review`），整库扫描也从 20 秒涨到 98 秒。现在默认还是整链对齐，只有整链判 `review` 时才试
+  「每季按自己的 ID 对齐」，并且只在它确实多对上集时才采纳（Cyberpunk 两季靠 `相同世界观` 相连，
+  链里没有第二季，就是这样救回来的）。
+- `--series-id`：`scan` / `auto` / `special` / `anchor` / `season` / `verify` / `sync` 都支持按
+  Jellyfin 条目 id 点名单部或多部（可重复传），不用为了修一部去扫全库。
+- `verify --by-series`：按剧聚合输出（集数 / unknown / low-sim / dup / disorder / foreign /
+  season-ids / 名称覆盖率），先修哪部一眼可见。
+- `verify --fail-on <keys>`：把体检结论变成退出码（`--fail-on dup,season-ids`），适合放进 cron
+  或 CI；`--fail-on none` 只出报告。
+- `sync`：一条龙 `scan` → `apply` → `anchor --seasons` → `special` → `verify`，默认只跑前面几步、
+  不写库时要显式 `--dry-run`；支持 `--stop-on-review`、`--refresh`、`--fail-on`、`--backup-dir`、
+  `--out-dir`、`--clear-spans`、`--force`。
+- **离线档案的回退修正**：subject 在档案里、但它的集在档案里还没集名（刚入库的新季）时，
+  `OfflineBangumi.episode_list()` 现在会回落到在线 API；此前会返回空池，新季直接判 `review`
+  （`empty Bangumi pool`）。
 - `apply --refresh`（`season` / `auto` 同）：写完 ID 后，只对这次改过的集调用 Jellyfin 的
   `POST /Items/{id}/Refresh`，让 Bangumi 插件按新 ID 重写它自己负责的字段。修好 ID 不等于修好
   元数据：集名/简介来自 TMDb，标题（`OriginalTitle`）来自 Bangumi——ID 曾指向上一季时，标题会
