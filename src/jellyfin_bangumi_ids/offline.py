@@ -310,6 +310,13 @@ class OfflineBangumi:
 
     def episode_list(self, subject_id: int) -> List[Dict[str, Any]]:
         eps = [e for e in self.episodes(subject_id, 0) if e.get("name") or e.get("name_cn")]
+        if not eps:
+            # A subject added to Bangumi after the archive snapshot can be present
+            # while its episodes are still unnamed or missing altogether; a brand-new
+            # season would otherwise look like an empty pool.
+            self.api_hits += 1
+            eps = [e for e in self.api.episodes(subject_id, 0)
+                   if e.get("name") or e.get("name_cn")]
         eps.sort(key=lambda e: e.get("sort") or 0)
         return eps
 

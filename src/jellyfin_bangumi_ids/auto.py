@@ -4,6 +4,7 @@ from __future__ import annotations
 import re
 from typing import Any, Dict, List, Optional
 
+from .jellyfin import select_series
 from .match import align, is_special, name_match, similarity
 from .scan import log, pick_anchor
 from .season_align import plan_segments
@@ -22,9 +23,10 @@ def candidates(bgm, name: str, limit: int = 10) -> List[Dict[str, Any]]:
 
 
 def scan_auto(jf, bgm, library: Optional[str] = None, only: Optional[str] = None,
-              threshold: float = 0.45, limit: Optional[int] = None) -> List[Dict[str, Any]]:
+              threshold: float = 0.45, limit: Optional[int] = None,
+              series_ids: Optional[List[str]] = None) -> List[Dict[str, Any]]:
     results: List[Dict[str, Any]] = []
-    for series in jf.all_series(library_name=library, limit=limit):
+    for series in select_series(jf, series_ids, library=library, limit=limit):
         if only and only not in (series.get("Name") or ""):
             continue
         groups: List[List[Dict[str, Any]]] = []

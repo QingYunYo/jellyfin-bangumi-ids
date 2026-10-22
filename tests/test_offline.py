@@ -54,6 +54,22 @@ class FakeApi:
         return {"id": eid, "name": "api-%d" % eid}
 
 
+class EmptyEpisodeFallbackTest(unittest.TestCase):
+    """A subject that is in the archive but has no usable episode titles yet."""
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp()
+        self.dir = os.path.join(self.tmp, "archive")
+        write_archive(self.dir, SUBJECTS, EPISODES)
+
+    def test_unnamed_archive_episodes_fall_back_to_api(self):
+        api = FakeApi()
+        bgm = OfflineBangumi(ArchiveIndex(self.dir), api)
+        eps = bgm.episode_list(95225)
+        self.assertEqual([e["id"] for e in eps], [99])
+        self.assertIn(("episodes", 95225), api.calls)
+
+
 class ArchiveTestCase(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.mkdtemp()

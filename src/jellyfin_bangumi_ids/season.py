@@ -28,11 +28,32 @@ def build_pool(bgm, rule: Dict[str, Any]) -> List[Dict[str, Any]]:
     return pool
 
 
-def scan_seasons(jf, bgm, mapping: Dict[str, Dict[str, Any]],
-                 threshold: float = 0.45) -> List[Dict[str, Any]]:
+def _mapping_targets(jf, mapping: Dict[str, Dict[str, Any]],
+                     series_ids: Optional[List[str]] = None
+                     ) -> List[Tuple[str, Dict[str, Any], Optional[Dict[str, Any]]]]:
+    """(series name, season rules, series DTO) in the order to walk them.
+
+    With ``series_ids`` the map is keyed by series name, so each selected item is
+    resolved first and its own ``Name`` looks the rules up -- the exact item wins over
+    a name that the library holds twice.
+    """
+    if not series_ids:
+        return [(name, seasons, None) for name, seasons in mapping.items()]
+    out: List[Tuple[str, Dict[str, Any], Optional[Dict[str, Any]]]] = []
+    for raw in series_ids:
+        series = jf.series_by_id(str(raw))
+        name = series.get("Name") or ""
+        if name not in mapping:
+            raise SystemExit("season map has no entry for %r (--series-id %s)" % (name, raw))
+        out.append((name, mapping[name], series))
+    return out
+
+
+def scan_seasons(jf, bgm, mapping: Dict[str, Dict[str, Any]], threshold: float = 0.45,
+                 series_ids: Optional[List[str]] = None) -> List[Dict[str, Any]]:
     results: List[Dict[str, Any]] = []
-    for series_name, seasons in mapping.items():
-        series = jf.find_series(series_name)
+    for series_name, seasons, selected in _mapping_targets(jf, mapping, series_ids):
+        series = selected or jf.find_series(series_name)
         for key, rule in sorted(seasons.items(), key=lambda kv: int(kv[0])):
             season = [s for s in jf.seasons(series["Id"]) if (s.get("IndexNumber") or 0) == int(key)]
             if not season:

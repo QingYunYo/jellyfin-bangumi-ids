@@ -138,7 +138,17 @@ class Jellyfin:
 
     def item(self, item_id: str) -> Dict[str, Any]:
         return self.get("/Items/%s" % item_id, {"userId": self.admin_user_id(),
-                                                "Fields": "ProviderIds,Path"})
+                                                "Fields": "ProviderIds,Path,OriginalTitle"})
+
+    def series_by_id(self, item_id: str) -> Dict[str, Any]:
+        """One series by its Jellyfin item id -- no name lookup, no ambiguity."""
+        dto = self.item(str(item_id)) or {}
+        if not dto.get("Id"):
+            raise SystemExit("series not found: item %s" % item_id)
+        kind = dto.get("Type")
+        if kind and kind != "Series":
+            raise SystemExit("item %s is not a series (%s)" % (item_id, kind))
+        return dto
 
     def set_provider_id(self, item_id: str, provider: str, value: Optional[str]) -> Dict[str, Any]:
         """GET the whole DTO, touch only one provider id, POST it back."""
@@ -182,3 +192,18 @@ class Jellyfin:
         current.update(values)
         self.post("/Plugins/%s/Configuration" % BANGUMI_PLUGIN_GUID, current)
         return self.plugin_configuration()
+
+
+def select_series(jf, series_ids: Optional[List[str]] = None,
+                  library: Optional[str] = None,
+                  limit: Optional[int] = None) -> List[Dict[str, Any]]:
+    """The series a run targets: exact item ids when given, the whole library otherwise.
+
+    Two shows can share a name (a movie folder and the TV entry, a merged duplicate),
+    and ``find_series`` refuses to guess.  ``--series-id`` skips the name lookup
+    entirely, so the run always lands on the entry the user meant.
+    """
+    if series_ids:
+        out = [jf.series_by_id(str(item_id)) for item_id in series_ids]
+        return out[:limit] if limit else out
+    return jf.all_series(library_name=library, limit=limit)

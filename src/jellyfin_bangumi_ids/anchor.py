@@ -32,10 +32,14 @@ def derive_anchor(bgm, jf, series: Dict[str, Any]) -> Tuple[Optional[int], str]:
     return sid, how if sid else "none"
 
 
-def run_anchor(jf, bgm, name: str, library: Optional[str] = None,
+def run_anchor(jf, bgm, name: Optional[str] = None, library: Optional[str] = None,
                sid: Optional[int] = None, clear: bool = False, force: bool = False,
-               dry_run: bool = False, backup_path: Optional[str] = None) -> Dict[str, Any]:
-    series = jf.find_series(name, library_name=library)
+               dry_run: bool = False, backup_path: Optional[str] = None,
+               item_id: Optional[str] = None) -> Dict[str, Any]:
+    if item_id:
+        series = jf.series_by_id(str(item_id))
+    else:
+        series = jf.find_series(name, library_name=library)
     current = (series.get("ProviderIds") or {}).get("Bangumi")
     out: Dict[str, Any] = {"series": series["Name"], "series_id": series["Id"],
                            "before": current, "dry_run": dry_run}
@@ -137,18 +141,22 @@ def season_report(bgm, jf, series: Dict[str, Any]) -> List[Dict[str, Any]]:
 
 def run_seasons(jf, bgm, name: Optional[str] = None, library: Optional[str] = None,
                 all_series: bool = False, dry_run: bool = False, force: bool = False,
-                clear_spans: bool = False, backup_path: Optional[str] = None) -> Dict[str, Any]:
+                clear_spans: bool = False, backup_path: Optional[str] = None,
+                series_ids: Optional[List[str]] = None) -> Dict[str, Any]:
     """Repair season-level Bangumi ids from the ids on their own episodes.
 
     This is the check that catches the failure the plugin cannot: episode ids can be
     perfect while the season id points a season back, and playback still reports the
     wrong subject.  Only confident votes are written unless ``force`` is set.
     """
-    if all_series:
+    if series_ids:
+        targets = [jf.series_by_id(str(item_id)) for item_id in series_ids]
+    elif all_series:
         targets = jf.all_series(library_name=library)
     else:
         targets = [jf.find_series(name, library_name=library)]
-    out: Dict[str, Any] = {"dry_run": dry_run, "series": len(targets), "issues": [], "fixed": 0}
+    out: Dict[str, Any] = {"dry_run": dry_run, "series": len(targets), "issues": [],
+                           "fixed": 0, "planned": 0, "failed": 0}
     written: List[Dict[str, Any]] = []
     for series in targets:
         issues = season_report(bgm, jf, series)
@@ -171,7 +179,10 @@ def run_seasons(jf, bgm, name: Optional[str] = None, library: Optional[str] = No
             log("  season %-3s id %-8s -> %-8s (%d/%d episodes)%s"
                 % (issue["season"], issue["current"] or "(none)", target or "(cleared)",
                    issue["count"], issue["total"], verdict))
-            if dry_run or not (issue["confident"] or force or target is None):
+            if not (issue["confident"] or force or target is None):
+                continue
+            out["planned"] += 1
+            if dry_run:
                 continue
             result = jf.set_provider_id(issue["season_id"], "Bangumi", target)
             issue["write"] = {"ok": result["ok"], "after": result["after"],
@@ -182,6 +193,7 @@ def run_seasons(jf, bgm, name: Optional[str] = None, library: Optional[str] = No
                                 "series": series["Name"], "season": issue["season"],
                                 "old": issue["current"], "new": target})
             else:
+                out["failed"] += 1
                 log("  ! write failed, still %s" % result["after"])
     if backup_path and written:
         with open(backup_path, "w", encoding="utf-8") as fh:

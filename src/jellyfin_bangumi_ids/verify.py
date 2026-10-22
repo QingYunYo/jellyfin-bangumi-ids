@@ -8,6 +8,99 @@ from typing import Any, Dict, List, Optional
 from .match import clean_title, similarity
 from .scan import log, season_id_issues, spanning_seasons
 
+# ``--fail-on`` accepts any counter from the report; the value is (report field, kind)
+# where kind is a raw counter, a list of rows, or the rows that carry an ``error``.
+FAIL_ON_FIELDS = {
+    "unknown": ("unknown", "count"),
+    "dup": ("duplicate", "count"),
+    "duplicate": ("duplicate", "count"),
+    "low-sim": ("low_similarity", "count"),
+    "low": ("low_similarity", "count"),
+    "low-similarity": ("low_similarity", "count"),
+    "disorder": ("disorder", "count"),
+    "foreign": ("foreign_subject", "count"),
+    "foreign-subject": ("foreign_subject", "count"),
+    "anchors": ("anchor_rows", "rows"),
+    "anchor-rows": ("anchor_rows", "rows"),
+    "season-id": ("season_rows", "rows"),
+    "season-ids": ("season_rows", "rows"),
+    "spans": ("span_rows", "rows"),
+    "season-spans": ("span_rows", "rows"),
+    "duplicate-series": ("duplicate_series", "rows"),
+    "errors": ("rows", "error"),
+}
+
+BY_SERIES_KINDS = ("low_similarity", "duplicate", "disorder", "foreign_subject",
+                   "unknown_id", "errors")
+
+
+def fail_on_breaches(report: Dict[str, Any], spec: Optional[str]) -> List[Any]:
+    """(key, count) for every selected counter above zero; ``none`` disables the gate.
+
+    An unknown key is a typo in a CI script: refusing it beats silently passing.
+    """
+    if not spec or spec.strip().lower() == "none":
+        return []
+    out: List[Any] = []
+    for raw in spec.split(","):
+        key = raw.strip().lower().replace("_", "-")
+        if not key:
+            continue
+        if key == "none":
+            return []
+        if key not in FAIL_ON_FIELDS:
+            raise SystemExit("unknown --fail-on item %r (known: %s)"
+                             % (key, ", ".join(sorted(FAIL_ON_FIELDS))))
+        field, kind = FAIL_ON_FIELDS[key]
+        value = report.get(field)
+        if kind == "count":
+            count = int(value or 0)
+        elif kind == "rows":
+            count = len(value or [])
+        else:
+            count = sum(1 for row in (value or []) if row.get("error"))
+        if count > 0:
+            out.append((key, count))
+    return out
+
+
+def by_series(report: Dict[str, Any], checked: Optional[Dict[str, int]] = None,
+              duplicates: Optional[Dict[str, int]] = None) -> List[Dict[str, Any]]:
+    """Problem counts per series, worst first.
+
+    ``coverage`` is the share of checked episodes without any finding -- a series with
+    one broken id out of twelve scores 0.92, a series with four out of twelve 0.67.
+    """
+    checked = checked or {}
+    rows = report.get("rows") or []
+    counts: Dict[str, Dict[str, int]] = {}
+    flagged: Dict[str, set] = {}
+    for row in rows:
+        name = row.get("series")
+        if not name:
+            continue
+        bucket = counts.setdefault(name, dict.fromkeys(BY_SERIES_KINDS, 0))
+        kind = row.get("kind")
+        if not kind:
+            kind = "errors" if row.get("error") else "low_similarity"
+        if kind not in bucket:
+            bucket[kind] = 0
+        bucket[kind] += 1
+        flagged.setdefault(name, set()).add(row.get("item_id") or row.get("bgm_id"))
+    for name, number in (duplicates or {}).items():
+        counts.setdefault(name, dict.fromkeys(BY_SERIES_KINDS, 0))["duplicate"] += int(number)
+    out: List[Dict[str, Any]] = []
+    for name, bucket in counts.items():
+        episodes = int(checked.get(name, 0))
+        bad = len([key for key in flagged.get(name, ()) if key])
+        row = {"series": name, "episodes": episodes,
+               "total": sum(bucket.values()),
+               "coverage": round((episodes - bad) / float(episodes), 4) if episodes else 0.0}
+        row.update(bucket)
+        out.append(row)
+    out.sort(key=lambda r: (-r["total"], -r["episodes"], r["series"]))
+    return out
+
 
 def season_index_map(season_list: List[Dict[str, Any]]) -> Dict[str, int]:
     """SeasonId -> IndexNumber, so episodes can be grouped by the season they belong to."""
@@ -27,13 +120,17 @@ def episode_season(episode: Dict[str, Any], season_ix: Dict[str, int]) -> int:
 
 
 def run_verify(jf, bgm, library: Optional[str] = None, limit: Optional[int] = None,
-               threshold: float = 0.45, out: str = "jbmid-check.json") -> Dict[str, Any]:
+               threshold: float = 0.45, out: str = "jbmid-check.json",
+               series_ids: Optional[List[str]] = None) -> Dict[str, Any]:
     checked = low = 0
     rows: List[Dict[str, Any]] = []
     season_rows: List[Dict[str, Any]] = []
     span_rows: List[Dict[str, Any]] = []
     subjects = set()
-    for series in jf.all_series(library_name=library, limit=limit):
+    per_series: Dict[str, int] = {}
+    series_list = ([jf.series_by_id(str(item_id)) for item_id in series_ids]
+                   if series_ids else jf.all_series(library_name=library, limit=limit))
+    for series in series_list:
         seasons = getattr(jf, "seasons", None)
         season_list = (seasons(series["Id"]) if seasons else []) or []
         season_ix = season_index_map(season_list)
@@ -49,6 +146,7 @@ def run_verify(jf, bgm, library: Optional[str] = None, limit: Optional[int] = No
                              "error": str(exc)})
                 continue
             checked += 1
+            per_series[series["Name"]] = per_series.get(series["Name"], 0) + 1
             subjects.add(remote.get("subject_id"))
             # SeasonId is authoritative: Jellyfin can leave ParentIndexNumber at 1
             # for every season of a show, which would merge separate seasons.
@@ -75,6 +173,7 @@ def run_verify(jf, bgm, library: Optional[str] = None, limit: Optional[int] = No
     report = {"checked": checked, "low_similarity": low, "threshold": threshold,
               "subjects": sorted(x for x in subjects if x), "rows": rows,
               "season_rows": season_rows, "span_rows": span_rows}
+    report["by_series"] = by_series(report, per_series)
     with open(out, "w", encoding="utf-8") as fh:
         json.dump(report, fh, ensure_ascii=False, indent=1)
     log("checked %d episodes, %d below %.2f, %d season ids off -> %s"
@@ -84,7 +183,8 @@ def run_verify(jf, bgm, library: Optional[str] = None, limit: Optional[int] = No
 
 def run_verify_offline(jf, archive_dir: str, library: Optional[str] = None,
                        limit: Optional[int] = None, threshold: float = 0.45,
-                       out: str = "jbmid-check.json") -> Dict[str, Any]:
+                       out: str = "jbmid-check.json",
+                       series_ids: Optional[List[str]] = None) -> Dict[str, Any]:
     """Check every stored id against the plugin's offline archive instead of the API.
 
     Name similarity alone is noisy (fansub titles differ between groups), so the
@@ -100,7 +200,9 @@ def run_verify_offline(jf, archive_dir: str, library: Optional[str] = None,
     local = []          # (series, series_bangumi_id, episodes deduped by item id)
     by_name = {}
     global_items = set()
-    for series in jf.all_series(library_name=library, limit=limit):
+    series_list = ([jf.series_by_id(str(item_id)) for item_id in series_ids]
+                   if series_ids else jf.all_series(library_name=library, limit=limit))
+    for series in series_list:
         sid = arc.to_int((series.get("ProviderIds") or {}).get("Bangumi"))
         by_name.setdefault(series["Name"], []).append(series)
         eps = {}
@@ -133,6 +235,8 @@ def run_verify_offline(jf, archive_dir: str, library: Optional[str] = None,
     span_rows: List[Dict[str, Any]] = []
     seen: Dict[int, int] = {}
     rows: List[Dict[str, Any]] = []
+    per_series: Dict[str, int] = {}
+    series_pids: Dict[str, List[int]] = {}
     for series, sid, eps in local:
         seasons = getattr(jf, "seasons", None)
         season_list = (seasons(series["Id"]) if seasons else []) or []
@@ -166,6 +270,8 @@ def run_verify_offline(jf, archive_dir: str, library: Optional[str] = None,
                 continue
             checked += 1
             seen[pid] = seen.get(pid, 0) + 1
+            per_series[series["Name"]] = per_series.get(series["Name"], 0) + 1
+            series_pids.setdefault(series["Name"], []).append(pid)
             remote = remote_eps.get(pid)
             base = {"series": series["Name"], "item_id": ep["Id"], "bgm_id": pid,
                     "local": ep.get("Name"), "season": ep.get("ParentIndexNumber"),
@@ -194,6 +300,8 @@ def run_verify_offline(jf, archive_dir: str, library: Optional[str] = None,
                 last_sort[rsub] = sort
 
     dup = sum(1 for n in seen.values() if n > 1)
+    duplicates_by_series = {name: sum(1 for pid in set(pids) if seen.get(pid, 0) > 1)
+                            for name, pids in series_pids.items()}
 
     anchor_rows = []
     for series, sid, eps in local:
@@ -218,6 +326,7 @@ def run_verify_offline(jf, archive_dir: str, library: Optional[str] = None,
               "threshold": threshold, "anchor_rows": anchor_rows, "season_rows": season_rows,
               "span_rows": span_rows, "duplicate_series": duplicate_series, "rows": rows,
               "subjects": sorted(x for x in used_subjects if x)}
+    report["by_series"] = by_series(report, per_series, duplicates_by_series)
     with open(out, "w", encoding="utf-8") as fh:
         json.dump(report, fh, ensure_ascii=False, indent=1)
     log("offline check: %d ids | unknown %d | dup %d | low-sim %d | disorder %d | foreign %d "

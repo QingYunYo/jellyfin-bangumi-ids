@@ -7,6 +7,7 @@ import sys
 from collections import Counter
 from typing import Any, Dict, List, Optional, Tuple
 
+from .jellyfin import select_series
 from .match import (align, episode_similarity, fill_gaps, is_special, name_match, similarity,
                     title_keys)
 from .season_align import plan_segments
@@ -252,9 +253,14 @@ def _fit_chain(bgm, chain: List[int], anchor: int, local_total: int) -> List[int
 
 
 def _season_groups(jf, series: Dict[str, Any]
-                   ) -> Tuple[List[List[Dict[str, Any]]], int]:
-    """Local main-season episodes, grouped by season, specials dropped and counted."""
+                   ) -> Tuple[List[List[Dict[str, Any]]], int, List[Dict[str, Any]]]:
+    """Local main-season episodes, grouped by season, specials dropped and counted.
+
+    The season DTOs are returned alongside the groups: each season may carry its own
+    Bangumi id, and that id picks the pool for its group without consulting the chain.
+    """
     groups: List[List[Dict[str, Any]]] = []
+    seasons: List[Dict[str, Any]] = []
     skipped = 0
     for season in jf.seasons(series["Id"]):
         if (season.get("IndexNumber") or 0) < 1:
@@ -264,22 +270,83 @@ def _season_groups(jf, series: Dict[str, Any]
         kept = [e for e in episodes if not is_special(e.get("Name") or "")]
         skipped += len(episodes) - len(kept)
         groups.append(kept)
-    return groups, skipped
+        seasons.append(season)
+    return groups, skipped, seasons
 
 
-def _segments(groups: List[List[Dict[str, Any]]], bgm, chain: List[int]
-              ) -> List[Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]]:
+def _season_owned_segments(groups: List[List[Dict[str, Any]]], bgm,
+                           series: Optional[Dict[str, Any]],
+                           seasons: List[Dict[str, Any]]
+                           ) -> Tuple[List[Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]],
+                                      set, List[str]]:
+    """Seasons whose own stored id is trustworthy enough to align on its own.
+
+    The stored id is one field a bad match can poison, but a season id that survives
+    the title check *and* whose subject is about as long as the season is strong
+    evidence -- stronger than a chain that cannot describe the split (two local
+    seasons of one franchise whose subjects relate by "相同世界观", not by 续集).
+    """
+    owned: List[Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]] = []
+    covered: set = set()
+    used: set = set()
+    notes: List[str] = []
+    for index, (group, season) in enumerate(zip(groups, seasons or [])):
+        if not group:
+            continue
+        raw = (season.get("ProviderIds") or {}).get("Bangumi")
+        try:
+            sid = int(raw)
+        except (TypeError, ValueError):
+            continue
+        if sid in used:
+            continue
+        if series is not None and not anchor_plausible(bgm, series, sid):
+            continue
+        try:
+            pool = bgm.episode_list(sid)
+        except Exception:                                # noqa: BLE001 - id may be stale
+            continue
+        if not pool or not _size_ok(len(group), len(pool)):
+            continue
+        used.add(sid)
+        covered.add(index)
+        owned.append((group, pool))
+        notes.append("season %s keeps its own subject %d (%d/%d episodes)"
+                     % (season.get("IndexNumber") or index + 1, sid, len(group), len(pool)))
+    return owned, covered, notes
+
+
+def _segments(groups: List[List[Dict[str, Any]]], bgm, chain: List[int],
+              series: Optional[Dict[str, Any]] = None,
+              seasons: Optional[List[Dict[str, Any]]] = None,
+              owned: bool = False
+              ) -> Tuple[List[Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]], List[str]]:
     """Split local episodes into the groups we align against one pool at a time.
 
-    When the number of local seasons equals the number of subjects in the chain,
-    each season is aligned against its own subject -- aligning the whole series
-    against the whole chain makes one missing episode shift every later season.
-    Every other shape falls back to one flat pool.
+    With ``owned=True`` a season that stores a plausible id of its own is aligned
+    against that subject first, and the rest of the series still walks the chain.
+    That resolves franchises whose seasons do not form a chain (Cyberpunk: the two
+    subjects relate by "相同世界观"), but it also mistakes a season that legitimately
+    spans two subjects for one that owns a single subject -- so the caller only asks
+    for it after the plain chain failed, never by default.  Every episode id may
+    appear only once across the returned segments.
     """
+    owned_segments, covered, notes = _season_owned_segments(groups, bgm, series or {}, seasons or [])
+    if owned and owned_segments:
+        owned = owned_segments
+        taken = {str(ep.get("id")) for _group, pool in owned for ep in pool}
+        rest = [group for index, group in enumerate(groups) if index not in covered and group]
+        if not rest:
+            return owned, notes
+        # Keep the chain order, but drop the episodes a stored season id already
+        # claimed: the whole result may not carry the same bgm id twice.
+        pool = [ep for ep in build_pool(bgm, chain) if str(ep.get("id")) not in taken]
+        flat = [episode for group in rest for episode in group]
+        return owned + [(flat, pool)], notes
     if len(groups) == len(chain) and all(groups):
-        return [(group, bgm.episode_list(sid)) for group, sid in zip(groups, chain)]
+        return [(group, bgm.episode_list(sid)) for group, sid in zip(groups, chain)], []
     flat = [episode for group in groups for episode in group]
-    return [(flat, build_pool(bgm, chain))]
+    return [(flat, build_pool(bgm, chain))], []
 
 
 def _align_segment(local: List[Dict[str, Any]], pool: List[Dict[str, Any]],
@@ -409,7 +476,8 @@ def _match_segments(segments: List[Tuple[List[Dict[str, Any]], List[Dict[str, An
 
     A segment carries an optional third element: the pairs of a season plan. Those
     already proved their window, so ``strict_size`` (the flat-pool sanity gates)
-    is skipped for them and only duplicate episode ids are checked.
+    is skipped for them. Duplicate episode ids are rejected in every shape, because
+    season-level pools can overlap each other.
     """
     matched = 0
     sim_sum = 0.0
@@ -462,10 +530,9 @@ def _match_segments(segments: List[Tuple[List[Dict[str, Any]], List[Dict[str, An
                 "sim": round(similarity(ep.get("Name") or "",
                                         bgm_ep.get("name_cn") or bgm_ep.get("name") or ""), 3),
             })
-    if not strict_size:
-        ids = [e["bgm_id"] for e in episodes]
-        if len(set(ids)) != len(ids):
-            problems.append("duplicate Bangumi episode ids after season alignment")
+    ids = [e["bgm_id"] for e in episodes]
+    if len(set(ids)) != len(ids):
+        problems.append("duplicate Bangumi episode ids after season alignment")
     return episodes, matched, sim_sum, total_local, problems, notes
 
 
@@ -486,7 +553,7 @@ def scan_series(jf, bgm, series: Dict[str, Any], allow_search: bool = True,
 
     entry["anchor"], entry["anchor_how"] = sid, how
     chain = bgm.chain(sid)
-    groups, skipped = _season_groups(jf, series)
+    groups, skipped, seasons = _season_groups(jf, series)
     entry["skipped_specials"] = skipped
     total_local = sum(len(group) for group in groups)
     if not total_local:
@@ -498,9 +565,49 @@ def scan_series(jf, bgm, series: Dict[str, Any], allow_search: bool = True,
         entry["notes"].append("chain trimmed to %d subject(s)" % len(fitted))
     chain = fitted
     entry["chain"] = chain
-    segments = [(local, pool, None) for local, pool in _segments(groups, bgm, chain)]
+    located, seg_notes = _segments(groups, bgm, chain, series=series, seasons=seasons)
+    entry["notes"].extend(seg_notes)
+    segments = [(local, pool, None) for local, pool in located]
     episodes, matched, sim_sum, total_local, problems, kept_notes = _match_segments(
         segments, threshold)
+    if problems:
+        # Season votes can elect one season's subject as the anchor while the library
+        # holds a franchise whose other seasons belong to subjects the chain of that
+        # anchor does not reach (Cyberpunk: S1 and S2 relate by "相同世界观"). The
+        # series-level id, when it passes the title check, describes the show the
+        # library actually stores -- try it before degrading to review.
+        own_sid, _own_how = series_anchor(series)
+        if own_sid and own_sid != sid and anchor_plausible(bgm, series, own_sid):
+            alt_chain = _fit_chain(bgm, bgm.chain(own_sid), own_sid, total_local)
+            alt_located, alt_seg_notes = _segments(groups, bgm, alt_chain, series=series,
+                                                   seasons=seasons, owned=True)
+            alt = _match_segments([(local, pool, None) for local, pool in alt_located],
+                                  threshold)
+            if not alt[4]:
+                episodes, matched, sim_sum = alt[0], alt[1], alt[2]
+                problems, kept_notes = [], alt[5]
+                chain = alt_chain
+                entry["chain"] = chain
+                entry["anchor"] = own_sid
+                entry["anchor_how"] = "series-id"
+                entry["notes"].extend(alt_seg_notes)
+                entry["notes"].append("chain from series id %s (season ids disagree)" % own_sid)
+    if problems:
+        # A franchise whose seasons know their own subject but whose chain does not
+        # reach all of them (Cyberpunk: S1 and S2 relate by "相同世界观", not 续集)
+        # fails the plain chain. Trust the stored season ids here -- and only here.
+        owned_located, owned_notes = _segments(groups, bgm, chain, series=series,
+                                               seasons=seasons, owned=True)
+        if owned_notes:
+            alt = _match_segments([(local, pool, None) for local, pool in owned_located],
+                                  threshold)
+            # A better placement is worth taking even when it reports a problem of its
+            # own ("duplicate Bangumi episode ids" beats "size mismatch"): the specific
+            # reason tells the user which season ids collide.
+            if alt[1] >= matched and (not alt[4] or alt[1] > matched):
+                episodes, matched, sim_sum = alt[0], alt[1], alt[2]
+                problems, kept_notes = alt[4], alt[5]
+                entry["notes"].extend(owned_notes)
     if problems:
         # The flat shape failed; try to place each local season on its own run of
         # subjects before falling back to the review we would have reported. Only a
@@ -703,8 +810,12 @@ def scan_specials(jf, bgm, series: Dict[str, Any], min_sim: float = 0.55,
 
 
 def run_specials(jf, bgm, library=None, limit=None, verbose=False,
-                 out: str = "jbmid-specials.json", clear_borrowed: bool = False) -> Dict[str, Any]:
-    series_list = jf.all_series(library_name=library)
+                 out: str = "jbmid-specials.json", clear_borrowed: bool = False,
+                 series_ids: Optional[List[str]] = None) -> Dict[str, Any]:
+    if series_ids:
+        series_list = select_series(jf, series_ids, limit=limit)
+    else:
+        series_list = jf.all_series(library_name=library)
     if limit:
         series_list = series_list[:limit]
     report: Dict[str, Any] = {"library": library, "mode": "special", "series": []}
@@ -786,8 +897,12 @@ def season_id_issues(seasons: List[Dict[str, Any]],
 
 def run_scan(jf, bgm, library: Optional[str] = None, limit: Optional[int] = None,
              allow_search: bool = True, threshold: float = 0.45,
-             out: str = "jbmid-report.json") -> Dict[str, Any]:
-    series_list = jf.all_series(library_name=library, limit=limit)
+             out: str = "jbmid-report.json",
+             series_ids: Optional[List[str]] = None) -> Dict[str, Any]:
+    if series_ids:
+        series_list = select_series(jf, series_ids, limit=limit)
+    else:
+        series_list = jf.all_series(library_name=library, limit=limit)
     log("scanning %d series%s" % (len(series_list), " from library %s" % library if library else ""))
     report: Dict[str, Any] = {"library": library, "threshold": threshold, "series": []}
     done = 0
@@ -824,7 +939,12 @@ def run_scan(jf, bgm, library: Optional[str] = None, limit: Optional[int] = None
 
 def apply_report(jf, report: Dict[str, Any], backup_path: Optional[str] = None,
                  dry_run: bool = False, only: Optional[str] = None,
-                 refresh: bool = False) -> List[Dict[str, Any]]:
+                 refresh: bool = False,
+                 stats: Optional[Dict[str, int]] = None) -> List[Dict[str, Any]]:
+    if stats is not None:
+        stats.setdefault("written", 0)
+        stats.setdefault("failed", 0)
+        stats.setdefault("skipped", 0)
     entries = [e for e in report.get("series", []) if e.get("status") == OK]
     if only:
         entries = [e for e in entries if only in (e.get("series") or "")]
@@ -842,9 +962,13 @@ def apply_report(jf, report: Dict[str, Any], backup_path: Optional[str] = None,
             else:
                 result = jf.set_provider_id(ep["item_id"], "Bangumi", target)
             if result["before"] == result["after"]:
+                if stats is not None:
+                    stats["skipped"] += 1
                 continue
             if not result["ok"]:
                 log("  ! write failed: %s #%s" % (entry["series"], ep.get("index")))
+                if stats is not None:
+                    stats["failed"] += 1
                 continue
             if result["collateral"]:
                 log("  ! collateral change: %s" % result["collateral"])
@@ -852,6 +976,8 @@ def apply_report(jf, report: Dict[str, Any], backup_path: Optional[str] = None,
                            "season": ep.get("season"), "index": ep.get("index"),
                            "name": ep.get("name"), "old": result["before"], "new": result["after"]})
             written += 1
+            if stats is not None:
+                stats["written"] += 1
     if backup_path and backup and not dry_run:
         with open(backup_path, "w", encoding="utf-8") as fh:
             json.dump(backup, fh, ensure_ascii=False, indent=1)
