@@ -365,3 +365,31 @@ class SpecialMarkerTest(unittest.TestCase):
         self.assertTrue(is_special("第3话 SP02"))
         self.assertFalse(is_special("致死之疾，然后…（Splitting of the Breast）"))
         self.assertFalse(is_special("Specials"))
+
+
+class UnnamedPoolBgm(FakeBgm):
+    """Bangumi rows that exist but carry no title yet (a show mid-season)."""
+
+    def episode_list(self, sid, include_unnamed=False):
+        rows = list(self.subjects.get(sid, []))
+        if include_unnamed:
+            return rows
+        return [r for r in rows if r.get("name") or r.get("name_cn")]
+
+
+class UnnamedPoolTest(unittest.TestCase):
+    def test_airing_show_is_filled_by_order(self):
+        eps = [("a", "FX是什么？"), ("b", "我上杠杆了所以没问题"), ("c", "不止损，不行……？"),
+               ("d", "没有浮亏简直太棒了"), ("e", "做多？做空？"), ("f", "留意经济指标"),
+               ("g", "我不要被强制平仓啊")]
+        jf = FakeJf(series(pid=622288), [(1, eps)])
+        rows = [{"id": 1741638, "name_cn": "FX⋯是什么？", "sort": 1},
+                {"id": 1741639, "name_cn": "有槓杆就没问题", "sort": 2}]
+        rows += [{"id": 1741640 + k, "name_cn": "", "name": "", "sort": 3 + k} for k in range(10)]
+        entry = scan_series(jf, UnnamedPoolBgm({622288: rows}), jf.series)
+        self.assertEqual(entry["status"], OK)
+        self.assertEqual(round(entry["coverage"], 3), 1.0)
+        self.assertEqual([e["bgm_id"] for e in entry["episodes"]],
+                         [str(1741638 + k) for k in range(7)])
+        self.assertTrue(any("untitled" in n for n in entry["notes"]), entry["notes"])
+        self.assertEqual(entry["to_write"], 7)

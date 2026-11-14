@@ -14,7 +14,7 @@ from typing import Dict
 
 APP = "jellyfin-bangumi-ids"
 FILENAME = "config.json"
-KEYS = ("url", "api_key", "archive", "archive_root", "lang")
+KEYS = ("url", "api_key", "archive", "archive_root", "lang", "ipv4")
 
 LAST_ERROR: list = []
 

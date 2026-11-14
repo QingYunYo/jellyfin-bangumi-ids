@@ -79,3 +79,28 @@ class LanguageFlagTest(unittest.TestCase):
                 redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()):
             self.assertEqual(cli.main(["--lang", "en", "doctor"]), 0)
         self.assertEqual(self.settings.load()["lang"], "en")
+
+
+class StoredIpv4Test(unittest.TestCase):
+    def test_stored_flag_forces_ipv4(self):
+        import tempfile
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        calls = []
+        args = mock.Mock(ipv4=False, timeout=20.0, url="http://jf:8096", api_key="k")
+        with mock.patch.dict(os.environ, {"JBMID_CONFIG_DIR": tmp.name}), \
+                mock.patch.object(cli, "force_ipv4", lambda: calls.append(1)):
+            cli.settings.save({"ipv4": "on"})
+            cli.clients(args)
+        self.assertEqual(calls, [1])
+
+    def test_absent_flag_leaves_ipv4_alone(self):
+        import tempfile
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        calls = []
+        args = mock.Mock(ipv4=False, timeout=20.0, url="http://jf:8096", api_key="k")
+        with mock.patch.dict(os.environ, {"JBMID_CONFIG_DIR": tmp.name}), \
+                mock.patch.object(cli, "force_ipv4", lambda: calls.append(1)):
+            cli.clients(args)
+        self.assertEqual(calls, [])

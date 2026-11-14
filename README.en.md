@@ -253,6 +253,11 @@ subject first, while the other seasons still walk the chain (`notes` then say
 chain failed**; by default the chain still decides, otherwise a season that legitimately spans two
 subjects would be split into "this season owns one subject".
 
+A currently airing show often has its Bangumi entries created but not titled yet. `scan` anchors the
+offset on the episodes that do have titles, then pairs the blank ones right after them **by order**
+(`notes` say `filled 5 untitled Bangumi episode(s) by order`). Only untitled entries are filled, and
+only after at least one titled pair -- a title that merely looks similar still never gets guessed.
+
 ### 3.3 `apply` / `rollback`: land the report, or undo it
 
 ```bash
@@ -488,9 +493,10 @@ jbmid config --api-key KEY                 # store the key (plain text, file 060
 jbmid config --archive DIR                 # archive directory (absolute, with episode.jsonlines)
 jbmid config --archive-root DIR            # Jellyfin's data directory; the archive is derived
 jbmid config --lang en                     # interface language, stored for next time
+jbmid config --ipv4 on                     # remember to force IPv4 (always on when v6 hangs for 20 s)
 jbmid config --test                        # connect once and print version / users / libraries
 jbmid config                               # editor in a terminal, plain print when piped
-jbmid config --unset archive               # drop one value (url/api_key/archive/archive_root/lang)
+jbmid config --unset archive               # drop one value (url/api_key/archive/archive_root/lang/ipv4)
 ```
 
 Stored in `~/.config/jellyfin-bangumi-ids/config.json` (`%APPDATA%` on Windows, override with

@@ -159,6 +159,40 @@ def fill_gaps(pairs: Sequence[Tuple[int, int]], n: int, m: int) -> List[Tuple[in
     return out
 
 
+def is_unnamed_pool(pool: Sequence[Dict[str, Any]], index: int) -> bool:
+    """Pool entries Bangumi created but never titled (a show that just started airing)."""
+    if index < 0 or index >= len(pool):
+        return False
+    row = pool[index]
+    return not ((row.get("name_cn") or row.get("name") or "").strip())
+
+
+def fill_unnamed(pairs: Sequence[Tuple[int, int]], local: Sequence[Any],
+                 pool: Sequence[Dict[str, Any]]) -> Tuple[List[Tuple[int, int]], int]:
+    """Pair the leftovers of an anchored run against consecutive untitled episodes.
+
+    ``FX戦士くるみちゃん`` is the shape this exists for: seven local episodes, the
+    first two titled on Bangumi and the five after them created but still blank.
+    Names cannot prove those five, but a named pair right before them pins the
+    offset, and the pool run has to be untitled and at least as long -- so the fill
+    never invents an id out of a title that merely looks similar.
+    """
+    out = list(pairs)
+    filled = 0
+    n, m = len(local), len(pool)
+    prev_i, prev_j = -1, -1
+    for i, j in list(pairs) + [(n, m)]:
+        gap_i, gap_j = i - prev_i - 1, j - prev_j - 1
+        if gap_i > 0 and gap_i <= gap_j and prev_i >= 0:
+            block = range(prev_j + 1, prev_j + 1 + gap_i)
+            if all(is_unnamed_pool(pool, k) for k in block):
+                out.extend((prev_i + 1 + k, prev_j + 1 + k) for k in range(gap_i))
+                filled += gap_i
+        prev_i, prev_j = i, j
+    out.sort()
+    return out, filled
+
+
 def name_match(left: str, right: str) -> bool:
     """Loose title guard: one title must contain the other after normalisation."""
     a, b = normalize(left), normalize(right)

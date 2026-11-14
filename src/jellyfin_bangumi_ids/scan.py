@@ -8,8 +8,8 @@ from collections import Counter
 from typing import Any, Dict, List, Optional, Tuple
 
 from .jellyfin import select_series
-from .match import (align, episode_similarity, fill_gaps, is_special, name_match, similarity,
-                    title_keys)
+from .match import (align, episode_similarity, fill_gaps, fill_unnamed, is_special, name_match,
+                    similarity, title_keys)
 from .season_align import plan_segments
 
 OK, REVIEW = "ok", "review"
@@ -217,10 +217,13 @@ def collect_local_episodes(jf, series: Dict[str, Any]) -> Tuple[List[Dict[str, A
     return out, skipped
 
 
-def build_pool(bgm, chain: List[int]) -> List[Dict[str, Any]]:
+def build_pool(bgm, chain: List[int], include_unnamed: bool = False) -> List[Dict[str, Any]]:
     pool: List[Dict[str, Any]] = []
     for sid in chain:
-        pool.extend(bgm.episode_list(sid))
+        try:
+            pool.extend(bgm.episode_list(sid, include_unnamed=include_unnamed))
+        except TypeError:  # a client that predates the keyword
+            pool.extend(bgm.episode_list(sid))
     return pool
 
 
@@ -319,7 +322,7 @@ def _season_owned_segments(groups: List[List[Dict[str, Any]]], bgm,
 def _segments(groups: List[List[Dict[str, Any]]], bgm, chain: List[int],
               series: Optional[Dict[str, Any]] = None,
               seasons: Optional[List[Dict[str, Any]]] = None,
-              owned: bool = False
+              owned: bool = False, include_unnamed: bool = False
               ) -> Tuple[List[Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]], List[str]]:
     """Split local episodes into the groups we align against one pool at a time.
 
@@ -340,21 +343,29 @@ def _segments(groups: List[List[Dict[str, Any]]], bgm, chain: List[int],
             return owned, notes
         # Keep the chain order, but drop the episodes a stored season id already
         # claimed: the whole result may not carry the same bgm id twice.
-        pool = [ep for ep in build_pool(bgm, chain) if str(ep.get("id")) not in taken]
+        pool = [ep for ep in build_pool(bgm, chain, include_unnamed)
+                if str(ep.get("id")) not in taken]
         flat = [episode for group in rest for episode in group]
         return owned + [(flat, pool)], notes
     if len(groups) == len(chain) and all(groups):
-        return [(group, bgm.episode_list(sid)) for group, sid in zip(groups, chain)], []
+        def _eps(sid):
+            try:
+                return bgm.episode_list(sid, include_unnamed=include_unnamed)
+            except TypeError:
+                return bgm.episode_list(sid)
+        return [(group, _eps(sid)) for group, sid in zip(groups, chain)], []
     flat = [episode for group in groups for episode in group]
-    return [(flat, build_pool(bgm, chain))], []
+    return [(flat, build_pool(bgm, chain, include_unnamed))], []
 
 
 def _align_segment(local: List[Dict[str, Any]], pool: List[Dict[str, Any]],
-                   threshold: float) -> Tuple[List[Tuple[int, int]], bool]:
+                   threshold: float) -> Tuple[List[Tuple[int, int]], bool, int]:
     if len(pool) == len(local):
-        return [(i, i) for i in range(len(local))], True
-    return fill_gaps(align([e.get("Name") or "" for e in local], pool, threshold),
-                     len(local), len(pool)), False
+        return [(i, i) for i in range(len(local))], True, 0
+    pairs = fill_gaps(align([e.get("Name") or "" for e in local], pool, threshold),
+                      len(local), len(pool))
+    pairs, filled = fill_unnamed(pairs, local, pool)
+    return pairs, False, filled
 
 
 def _size_ok(local: int, pool: int) -> bool:
@@ -421,7 +432,7 @@ def _rescue_seasons(groups: List[List[Dict[str, Any]]], covered: set, bgm,
                 continue
             if not residual:
                 continue
-            pairs, _ = _align_segment(group, residual, threshold)
+            pairs, _, _ = _align_segment(group, residual, threshold)
             coverage = len(pairs) / float(len(group))
             mean_sim = _pairs_mean(group, residual, pairs)
             if coverage >= 0.6 and mean_sim >= 0.4 and _better(coverage, mean_sim, best):
@@ -444,7 +455,7 @@ def _rescue_seasons(groups: List[List[Dict[str, Any]]], covered: set, bgm,
                 pool = [e for e in pool if str(e["id"]) not in used_episode_ids]
                 if not pool:
                     continue
-                pairs, _ = _align_segment(group, pool, threshold)
+                pairs, _, _ = _align_segment(group, pool, threshold)
                 coverage = len(pairs) / float(len(group))
                 mean_sim = _pairs_mean(group, pool, pairs)
                 if coverage >= 0.6 and mean_sim >= 0.4 and _better(coverage, mean_sim, best):
@@ -490,8 +501,11 @@ def _match_segments(segments: List[Tuple[List[Dict[str, Any]], List[Dict[str, An
         if not pool:
             problems.append("empty Bangumi pool")
             continue
+        filled = 0
         if planned_pairs is None:
-            pairs, sequenced = _align_segment(local, pool, threshold)
+            pairs, sequenced, filled = _align_segment(local, pool, threshold)
+            if filled:
+                notes.append("filled %d untitled Bangumi episode(s) by order" % filled)
         else:
             pairs, sequenced = planned_pairs, len(pool) == len(local)
         if sequenced and pairs:
@@ -506,8 +520,12 @@ def _match_segments(segments: List[Tuple[List[Dict[str, Any]], List[Dict[str, An
         sim_sum += mean_sim * len(pairs)
         if strict_size:
             if not _size_ok(len(local), len(pool)):
-                problems.append("size mismatch %d local vs %d pool" % (len(local), len(pool)))
-            elif not sequenced and (coverage < 0.9 or mean_sim < 0.55):
+                # A show that just started airing has more local episodes than titled
+                # Bangumi entries; the order fill above already covered every local
+                # episode, so the size gap is expected rather than suspicious.
+                if not (filled and coverage >= 1.0):
+                    problems.append("size mismatch %d local vs %d pool" % (len(local), len(pool)))
+            elif not sequenced and (coverage < 0.9 or mean_sim < 0.55) and not filled:
                 # Titles differ between sources (local scrapes add translations, bgm keeps
                 # the plain one): a monotone pairing that covers every local episode and
                 # nearly every bgm episode is still evidence -- order alone pins the ids.
@@ -566,6 +584,13 @@ def scan_series(jf, bgm, series: Dict[str, Any], allow_search: bool = True,
     chain = fitted
     entry["chain"] = chain
     located, seg_notes = _segments(groups, bgm, chain, series=series, seasons=seasons)
+    if sum(len(pool) for _local, pool in located) < total_local:
+        # Bangumi created the episodes but has not titled them yet; the untitled rows
+        # are what makes a currently airing show alignable at all.
+        wider, _wider_notes = _segments(groups, bgm, chain, series=series, seasons=seasons,
+                                        include_unnamed=True)
+        if sum(len(pool) for _local, pool in wider) > sum(len(pool) for _local, pool in located):
+            located = wider
     entry["notes"].extend(seg_notes)
     segments = [(local, pool, None) for local, pool in located]
     episodes, matched, sim_sum, total_local, problems, kept_notes = _match_segments(

@@ -69,8 +69,13 @@ def api_key(args: argparse.Namespace) -> str:
     return key
 
 
+def _stored_ipv4() -> bool:
+    """The config flag for hosts whose IPv6 hangs (a NAS on a broken v6 uplink)."""
+    return str(settings.load().get("ipv4") or "").strip().lower() in ("1", "true", "yes", "on")
+
+
 def clients(args: argparse.Namespace):
-    if args.ipv4:
+    if getattr(args, "ipv4", False) or _stored_ipv4():
         force_ipv4()
     jf = Jellyfin(server_url(args), api_key(args), timeout=args.timeout)
     bgm = Bangumi(timeout=max(args.timeout, 10))
@@ -346,6 +351,8 @@ def _checked_path(raw: str, want_archive: bool) -> Optional[str]:
 
 
 def cmd_config(args: argparse.Namespace) -> int:
+    if getattr(args, "ipv4_mode", None) == "on" or _stored_ipv4():
+        force_ipv4()
     for key in args.unset or []:
         settings.unset(key)
         print("unset     : %s" % key)
@@ -373,6 +380,9 @@ def cmd_config(args: argparse.Namespace) -> int:
         value = getattr(args, key, None)
         if value:
             values[key] = value
+    ipv4 = getattr(args, "ipv4_mode", None)
+    if ipv4 is not None:
+        values["ipv4"] = "on" if ipv4 == "on" else "off"
     if values.get("lang"):
         set_lang(values["lang"])
     if values:
@@ -396,6 +406,8 @@ def cmd_config(args: argparse.Namespace) -> int:
         print("jellyfin  : %s (%d users, %d libraries)" % (
             info["version"], info["users"], info["libraries"]))
         return 0
+    if not values and not (args.unset or []) and sys.stdin.isatty():
+        return config_wizard(args)  # the editor prints the same block, once
     data = settings.load()
     print("config    : %s (%s)" % (settings.config_path(),
                                    "exists" if os.path.exists(settings.config_path()) else "missing"))
@@ -407,8 +419,6 @@ def cmd_config(args: argparse.Namespace) -> int:
             value = settings.mask(data.get(key, "")) or "(unset)"
         print("%-13s: %s" % (key, value))
     print("%-13s: %s" % ("url in use", server_url(args)))
-    if not values and not (args.unset or []) and sys.stdin.isatty():
-        return config_wizard(args)
     return 0
 
 
@@ -592,6 +602,8 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--archive-root", metavar="DIR",
                    help="host directory that contains Jellyfin's data mount")
     p.add_argument("--url", help="Jellyfin base URL, e.g. http://192.168.1.10:8096")
+    p.add_argument("--ipv4", choices=("on", "off"), dest="ipv4_mode",
+                   help="remember whether to force IPv4 lookups (on/off)")
     p.add_argument("--lang", choices=("zh", "en"), default=argparse.SUPPRESS,
                    help="interface language, stored for next time")
     p.add_argument("--unset", action="append", choices=list(settings.KEYS), metavar="KEY",

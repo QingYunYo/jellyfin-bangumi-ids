@@ -33,6 +33,13 @@
   `./_local/backups/`）；「一条龙」的 50 条阈值把季级 `season-issues` 一并计入。
 - **文档**：第 6 章补齐环境变量表（`JF_URL` / `JF_API_KEY` / `JBMID_ARCHIVE` / `JBMID_ARCHIVE_ROOT` /
   `JBMID_ARCHIVE_SEARCH` / `JBMID_CACHE` / `JBMID_CONFIG_DIR`），探测顺序由 5 档扩为 7 档。
+- **未命名集不再误判**：当季新番的 Bangumi 条目常常「已建集、没起名」，旧逻辑把这些集过滤掉，
+  于是 7 集对 2 集被判 review。现在先按已命名的前几集锚定偏移，再把紧跟其后的空白集按顺序补齐
+  （`notes` 写 `filled 5 untitled Bangumi episode(s) by order`），只填空白、且前面必须已经对上
+  至少一集——不会用「集名有点像」去猜。实测「FX战士久留美」由 review 变 ok（7/7，0 待写）。
+- **IPv4 记进配置**：`jbmid config --ipv4 on|off`（向导配置菜单同项）把「强制 IPv4」写进配置，
+  之后不带 `--ipv4` 的请求也走 IPv4——宿主 IPv6 出网黑洞时不再每个请求卡 20 秒。
+  实测配置为 on 后 `jbmid doctor` 0.15 秒完成。
 - **不用安装也能跑**：仓库根目录多了一个 `jbmid` 启动器（`./jbmid doctor`），外加
   `src/jellyfin_bangumi_ids/__main__.py`，于是 `PYTHONPATH=src python3 -m jellyfin_bangumi_ids` 也可用；
   Debian / NAS 上 PEP 668 拦掉 `pip install` 时直接跑仓库里的版本即可。

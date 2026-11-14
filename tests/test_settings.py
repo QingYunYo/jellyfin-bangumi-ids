@@ -22,6 +22,12 @@ class SettingsTest(unittest.TestCase):
         self.env.stop()
         self.tmp.cleanup()
 
+    def test_ipv4_flag_roundtrip(self):
+        settings.save({"ipv4": "on"})
+        self.assertEqual(settings.load()["ipv4"], "on")
+        settings.save({"ipv4": "off"})
+        self.assertEqual(settings.load()["ipv4"], "off")
+
     def test_roundtrip(self):
         settings.save({"archive": "/data/bangumi/archive", "url": "http://jf:8096"})
         data = settings.load()

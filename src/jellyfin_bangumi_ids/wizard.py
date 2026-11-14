@@ -171,6 +171,10 @@ _T: Dict[str, Tuple[str, str]] = {
                  "Jellyfin's data directory (Windows: C:\\ProgramData\\Jellyfin\\Server\\data; "
                  "Docker: the host directory mounted at /config)"),
     "cfg_lang": ("界面语言", "interface language"),
+    "cfg_ipv4": ("网络：跳过 IPv6（本机 v6 不通时开）", "network: skip IPv6 (on when v6 hangs)"),
+    "ipv4_on": ("开（只用 IPv4）", "on (IPv4 only)"),
+    "ipv4_off": ("关（走默认）", "off (default)"),
+    "ipv4_saved": ("已保存：IPv4 模式 %s，下次运行生效", "saved: IPv4 mode %s, takes effect next run"),
     "ask_lang": ("界面语言（中文 / English）", "interface language (中文 / English)"),
     "lang_saved": ("界面语言：%s", "interface language: %s"),
     "archive_step": ("接着配离线档案：能让扫描快 40 倍，回车跳过（走在线 API）。",
@@ -1095,7 +1099,8 @@ def _flow_config(sess: Session) -> None:
             mode = _choose(t("config"), [
                 ("url", t("cfg_url")), ("api_key", t("cfg_key")),
                 ("archive", t("cfg_archive")), ("archive_root", t("cfg_root")),
-                ("lang", t("cfg_lang")), ("test", t("test")), ("unset", t("cfg_unset")),
+                ("lang", t("cfg_lang")), ("ipv4", t("cfg_ipv4")), ("test", t("test")),
+                ("unset", t("cfg_unset")),
             ], back=t("back_menu"))
         except _Back:
             return
@@ -1110,6 +1115,20 @@ def _flow_config(sess: Session) -> None:
         if mode == "lang":
             _ask_lang()
             print("  " + t("lang_saved") % language())
+            continue
+        if mode == "ipv4":
+            try:
+                pick = _choose(t("cfg_ipv4"),
+                               [("on", t("ipv4_on")), ("off", t("ipv4_off"))],
+                               back=t("back_menu"))
+            except _Back:
+                continue
+            try:
+                settings.save({"ipv4": pick})
+            except OSError as exc:
+                print("  %s: %s" % (t("not_wrote"), exc))
+                continue
+            print("  " + t("ipv4_saved") % pick)
             continue
         if mode == "unset":
             try:

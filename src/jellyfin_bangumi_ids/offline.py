@@ -457,15 +457,23 @@ class OfflineBangumi:
         self.api_hits += 1
         return self.api.episode(episode_id)
 
-    def episode_list(self, subject_id: int) -> List[Dict[str, Any]]:
-        eps = [e for e in self.episodes(subject_id, 0) if e.get("name") or e.get("name_cn")]
+    def episode_list(self, subject_id: int, include_unnamed: bool = False
+                     ) -> List[Dict[str, Any]]:
+        """Main episodes sorted by ``sort``.
+
+        ``include_unnamed`` keeps episodes Bangumi has created but not titled yet
+        (a show that started airing last week). They carry no similarity evidence,
+        so only the order-based fill downstream may pair them.
+        """
+        eps = [e for e in self.episodes(subject_id, 0)
+               if include_unnamed or e.get("name") or e.get("name_cn")]
         if not eps:
             # A subject added to Bangumi after the archive snapshot can be present
             # while its episodes are still unnamed or missing altogether; a brand-new
             # season would otherwise look like an empty pool.
             self.api_hits += 1
             eps = [e for e in self.api.episodes(subject_id, 0)
-                   if e.get("name") or e.get("name_cn")]
+                   if include_unnamed or e.get("name") or e.get("name_cn")]
         eps.sort(key=lambda e: e.get("sort") or 0)
         return eps
 

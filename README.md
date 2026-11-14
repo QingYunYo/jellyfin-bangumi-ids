@@ -235,6 +235,10 @@ jbmid scan --series-id 9a63c5f950cf05e5ba3796722a403f27
 `season 2 keeps its own subject 513878 (10/10 episodes)`。这条退路**只在整链失败时**启用——
 默认仍先整链，否则「一个季横跨两个条目」会被误拆成「这一季有自己的条目」。
 
+当季新番常是「条目已建、集名还空着」：`scan` 会先拿对得上的前几集锚定偏移，再把紧跟着的空白集
+**按顺序**补齐，`notes` 里写 `filled 5 untitled Bangumi episode(s) by order`。它只填空白集，
+且前面必须已经对上至少一集——绝不用「集名有点像」去猜。
+
 ### 3.3 `apply` / `rollback`：报告落库与撤销
 
 ```bash
@@ -456,9 +460,10 @@ jbmid config --api-key KEY                 # 存 Key（明文，文件 0600；�
 jbmid config --archive DIR                 # 档案目录（必须是含 episode.jsonlines 的绝对路径）
 jbmid config --archive-root DIR            # Jellyfin 的 data 目录，自动推导出 archive
 jbmid config --lang zh                     # 界面语言，写进配置；`jbmid --lang en` 也可
+jbmid config --ipv4 on                     # 记住强制 IPv4（本机 IPv6 不通、请求卡 20 秒时开）；off 关
 jbmid config --test                        # 用当前配置连一次，打印版本/用户数/库数
 jbmid config                               # 终端里进编辑菜单；管道里只打印
-jbmid config --unset archive               # 删掉某一项（url/api_key/archive/archive_root/lang）
+jbmid config --unset archive               # 删掉某一项（url/api_key/archive/archive_root/lang/ipv4）
 ```
 
 存在 `~/.config/jellyfin-bangumi-ids/config.json`（Windows 为 `%APPDATA%`，`JBMID_CONFIG_DIR` 可改），

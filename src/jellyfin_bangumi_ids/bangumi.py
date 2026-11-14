@@ -102,8 +102,14 @@ class Bangumi:
     def episode(self, episode_id: int) -> Dict[str, Any]:
         return self.get("/v0/episodes/%d" % episode_id) or {}
 
-    def episode_list(self, subject_id: int) -> List[Dict[str, Any]]:
-        """Main episodes sorted by ``sort`` (SP excluded)."""
-        eps = [e for e in self.episodes(subject_id, 0) if e.get("name") or e.get("name_cn")]
+    def episode_list(self, subject_id: int, include_unnamed: bool = False
+                     ) -> List[Dict[str, Any]]:
+        """Main episodes sorted by ``sort`` (SP excluded).
+
+        ``include_unnamed`` keeps episodes without a title yet; they can only be
+        paired by order, never by name similarity.
+        """
+        eps = [e for e in self.episodes(subject_id, 0)
+               if include_unnamed or e.get("name") or e.get("name_cn")]
         eps.sort(key=lambda e: e.get("sort") or 0)
         return eps
