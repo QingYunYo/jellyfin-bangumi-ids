@@ -73,7 +73,23 @@ git clone https://github.com/QingYunYo/jellyfin-bangumi-ids.git
 cd jellyfin-bangumi-ids && pip install -e .
 ```
 
-装完有 `jbmid` 命令（也可 `python -m jellyfin_bangumi_ids`）。Jellyfin 里「控制台 → API 密钥」建一个，
+装完有 `jbmid` 命令。**装不上也不要紧**：Debian / NAS 上的 Python 常带 PEP 668
+（`externally-managed-environment`）保护，这时克隆下来直接用仓库自带的启动器，一个系统目录都不碰：
+
+```bash
+git clone https://github.com/QingYunYo/jellyfin-bangumi-ids.git
+cd jellyfin-bangumi-ids
+./jbmid doctor        # 等价于装好后的 jbmid doctor
+./jbmid wizard
+```
+
+真想装又不想动系统 Python，就开个虚拟环境：
+
+```bash
+python3 -m venv .venv && . .venv/bin/activate && pip install -e .
+```
+
+不安装时也可以 `PYTHONPATH=src python3 -m jellyfin_bangumi_ids <命令>`，效果一样。Jellyfin 里「控制台 → API 密钥」建一个，
 然后：
 
 ```bash

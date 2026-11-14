@@ -1,0 +1,9 @@
+#!/bin/sh
+# Run jbmid straight from a checkout, without installing anything.
+#
+#   ./jbmid doctor
+#   ./jbmid wizard
+#
+# If you installed the package (pip install ...), just call `jbmid` instead.
+here=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+PYTHONPATH="$here/src${PYTHONPATH:+:$PYTHONPATH}" exec python3 -m jellyfin_bangumi_ids "$@"

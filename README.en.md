@@ -76,7 +76,26 @@ git clone https://github.com/QingYunYo/jellyfin-bangumi-ids.git
 cd jellyfin-bangumi-ids && pip install -e .
 ```
 
-This gives you `jbmid` (also `python -m jellyfin_bangumi_ids`). Create an API key in Jellyfin
+This gives you `jbmid`. **If installing fails, that is fine**: Debian / NAS Python ships PEP 668
+(`externally-managed-environment`), and in that case run the bundled launcher from the checkout — it
+touches no system directory:
+
+```bash
+git clone https://github.com/QingYunYo/jellyfin-bangumi-ids.git
+cd jellyfin-bangumi-ids
+./jbmid doctor        # same as the installed jbmid doctor
+./jbmid wizard
+```
+
+Prefer a real install without touching system Python? Use a venv:
+
+```bash
+python3 -m venv .venv && . .venv/bin/activate && pip install -e .
+```
+
+Without installing you can also use `PYTHONPATH=src python3 -m jellyfin_bangumi_ids <command>`.
+
+Create an API key in Jellyfin
 (Dashboard → API Keys), then:
 
 ```bash

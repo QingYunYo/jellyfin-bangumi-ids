@@ -4,6 +4,9 @@
 
 ## 0.1.5（未发布）
 
+- **不用安装也能跑**：仓库根目录多了一个 `jbmid` 启动器（`./jbmid doctor`），外加
+  `src/jellyfin_bangumi_ids/__main__.py`，于是 `PYTHONPATH=src python3 -m jellyfin_bangumi_ids` 也可用；
+  Debian / NAS 上 PEP 668 拦掉 `pip install` 时直接跑仓库里的版本即可。
 - **交互向导 `jbmid wizard`**：把常用流程做成菜单（体检 / 修集级 / 修季级 / 修番外 / 一条龙 /
   回滚 / 单剧单库 / 配置）。每个写操作先给预览、再问一次，默认答案是不写；一次超过 50 条改动要求
   输入条数。启动时复用第 6 章的档案解析，找不到就先把尝试过的路径和失败原因打出来。写完打印备份、
