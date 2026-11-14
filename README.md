@@ -168,8 +168,8 @@ jbmid wizard --yes      # 非交互：全部取默认值，写操作一律不执
 （`--url` → `JF_URL` → `config` → 默认）与离线档案（顺序同第 6 章）；找不到档案时不是干问路径，
 而是先把尝试过的路径和失败原因打出来，再让你选「手输路径 / 告诉宿主挂载点 / 先用在线」。
 
-番外流程会另外问一句「清空借用正片 ID 的番外？」（默认 `N`，等价于 `--clear-borrowed`）。报告统一
-写在仓库的 `_local/backups/` 下；确认写入后还会问一句「写完后刷新这些条目？」（默认 `N`，等价于
+番外流程会另外问一句「清空借用正片 ID 的番外？」（默认 `N`，等价于 `--clear-borrowed`）。报告与备份默认写在
+当前目录（`--backup-dir` 可改）；确认写入后还会问一句「写完后刷新这些条目？」（默认 `N`，等价于
 `--refresh`）。一次改动超过 50 条时，光按 `y` 不够，要照着数字再敲一遍条数；还原备份同样走这个阈值。每次写入
 结束会打印三件事：备份文件、`jbmid rollback <备份>` 的还原命令、以及等价的非交互命令（方便你确认
 没问题后抄进 cron）。非交互环境（管道、CI）直接拒绝并返回 2，除非显式 `--yes`。
@@ -177,8 +177,9 @@ jbmid wizard --yes      # 非交互：全部取默认值，写操作一律不执
 界面约定：**方括号里写的就是直接回车时的默认值**，而 `0` 永远是「返回 / 退出 / 取消」——
 按回车不会替你做任何写操作；子菜单按 `0` 回主菜单（不退出程序），一个流程做完直接回主菜单。
 
-退出码：`0` 正常结束；`1` 连不上 Jellyfin；`2` 没有可交互终端且没给 `--yes`；`3` 输入流结束
-（喂完 stdin 的脚本）；`130` 被 Ctrl-C 打断。
+退出码：`0` 正常结束；`1` 连不上 Jellyfin 或 API Key 被拒；`2` 没有可交互终端且没给 `--yes`；
+`3` 输入流结束（喂完 stdin 的脚本）；`130` 被 Ctrl-C 打断。出任何错误只打一行结论和该改什么，
+想看完整请求就加 `-v`（打印每个 HTTP 请求、状态码与字节数）。
 
 ### 4.2 `scan`：先看清全局，再动手
 
@@ -278,7 +279,7 @@ jbmid verify --library 动漫 --fail-on season-ids,dup     # 有命中就 exit 1
 各字段含义见[第 5 章](#5-季级-id为什么必须一起修)；`--fail-on` 可选 `unknown dup low-sim
 disorder foreign anchors season-ids season-spans none`。
 
-### 4.9 `protect` / `doctor`
+### 4.9 `protect` / `doctor` / `config`
 
 ```bash
 jbmid protect     # 把 TrustExistedBangumiId 设为 True，刷新不再覆盖
@@ -414,7 +415,7 @@ jbmid doctor
 `jbmid config --unset archive` 可删掉某一项，`jbmid config` 不带参数时只显示当前值。
 
 索引缓存放在 `~/.cache/jellyfin-bangumi-ids/`（`JBMID_CACHE` 可改），约 150 MB，只读源文件；
-档案每 14 天更新一次，太旧时以在线 API 为准。档案里没有的条目（新集、关系图、按标题搜索）
+档案由插件的「离线数据库更新」任务维护（约两周一次，以插件为准），过期时以在线 API 为准。档案里没有的条目（新集、关系图、按标题搜索）
 自动回退在线 API。
 
 ## 7. 安全性
@@ -488,7 +489,7 @@ jbmid doctor
 ## 10. 开发
 
 ```bash
-PYTHONPATH=src python -m unittest discover -s tests   # 170 个用例，全部离线（未 pip install -e . 时）
+PYTHONPATH=src python -m unittest discover -s tests   # 184 个用例，全部离线（未 pip install -e . 时）
 ```
 
 CI 在 Python 3.8 / 3.10 / 3.12 上跑同一套测试。目录结构：

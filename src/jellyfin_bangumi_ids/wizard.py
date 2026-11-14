@@ -95,6 +95,17 @@ _T: Dict[str, Tuple[str, str]] = {
     "no_backups": ("找不到备份文件（先跑一次会写库的操作）。", "no backup files yet."),
     "pick_backup": ("编号", "number"),
     "restore_confirm": ("确认用这个备份还原？", "restore from this backup?"),
+    "enter_pick": ("直接回车默认选%s=%s", "Enter = %s (%s)"),
+    "enter_empty": ("直接回车=空", "Enter = empty"),
+    "all_hint": ("输a=全部", "a = all"),
+    "bulk_hint": ("直接回车默认选0=取消", "Enter = 0 (cancel)"),
+    "preview_failed": ("预览没通过，未写入。", "the preview failed; nothing was written."),
+    "rollback_warn": ("当前已存的 ID 会被覆盖，且不会产生新备份。",
+                      "current ids will be overwritten and no new backup is made."),
+    "more_backups": ("只列最近 %d 个；其余用 jbmid rollback <文件>",
+                     "only the newest %d are listed; use jbmid rollback <file> for the rest"),
+    "bad_limit": ("请输入数字（a=全部，0=返回）", "type a number (a = all, 0 = back)"),
+    "config_bad": ("（配置文件损坏，已忽略）", "(config file is broken, ignored)"),
 }
 
 
@@ -127,9 +138,9 @@ def _ask(prompt: str, default: str = "", hint: Optional[str] = None) -> str:
     if hint:
         tail = "[%s]" % hint
     elif default:
-        tail = "[直接回车默认选%s=%s]" % (default, default)
+        tail = "[%s]" % (t("enter_pick") % (default, default))
     else:
-        tail = "[直接回车=空]"
+        tail = "[%s]" % t("enter_empty")
     try:
         raw = input("%s%s: " % (prompt, tail))
     except EOFError:
@@ -141,12 +152,12 @@ def _ask(prompt: str, default: str = "", hint: Optional[str] = None) -> str:
 
 
 def _h(word: str, default: str = "0") -> str:
-    return "直接回车默认选%s=%s" % (default, word)
+    return t("enter_pick") % (default, word)
 
 
 def _ask_back(prompt: str) -> Optional[str]:
     """Free text where Enter (or 0) means 'go back'."""
-    raw = _ask(prompt, "0")
+    raw = _ask(prompt, "0", hint=_h(t("back_menu")))
     if raw in ("0", ""):
         raise _Back()
     return raw
@@ -154,7 +165,7 @@ def _ask_back(prompt: str) -> Optional[str]:
 
 def _confirm(prompt: str, default: bool = False) -> bool:
     word = "Y" if default else "N"
-    tail = "[直接回车默认选%s=%s]" % (word, t("yes_word") if default else t("no_word"))
+    tail = "[%s]" % (t("enter_pick") % (word, t("yes_word") if default else t("no_word")))
     try:
         raw = input("%s%s: " % (prompt, tail)).strip().lower()
     except EOFError:
@@ -176,9 +187,9 @@ def _choose(prompt: str, options: List[Tuple[str, str]], back: Optional[str] = N
         print("  0) %s" % back)
     while True:
         if back:
-            raw = _ask(prompt, "0", hint=_h("返回"))
+            raw = _ask(prompt, "0", hint=_h(t("back_menu")))
         else:
-            raw = _ask(prompt, "1", hint=_h("第一项", "1"))
+            raw = _ask(prompt, "1", hint=_h("first", "1"))
         if back and raw == "0":
             raise _Back()
         if raw.isdigit() and 1 <= int(raw) <= len(opts):
@@ -217,10 +228,6 @@ class Session:
             return False
         return _confirm(prompt, default=self.write_default)
 
-    def write_allowed(self) -> bool:
-        return self.write_default
-
-
 def _banner(sess: Session) -> None:
     version = sess.info.get("Version") or "?"
     if sess.archive:
@@ -236,8 +243,18 @@ def _banner(sess: Session) -> None:
 def _open(args) -> Optional[Session]:
     url = args.url or os.environ.get("JF_URL") or settings.load().get("url") or DEFAULT_URL
     key = args.api_key or os.environ.get("JF_API_KEY") or ""
+    if not key and _NONINTERACTIVE[0]:
+        print(t("nokey"))
+        return None
     while not key:
-        key = getpass.getpass("%s: " % t("key")).strip()
+        try:
+            key = getpass.getpass("%s: " % t("key")).strip()
+        except (EOFError, KeyboardInterrupt):
+            if _NONINTERACTIVE[0]:
+                print(t("nokey"))
+                return None
+            _eof()
+            return None
         if not key:
             print(t("nokey"))
             return None
@@ -259,10 +276,11 @@ def _open(args) -> Optional[Session]:
 def _archive(args, jf) -> Optional[str]:
     if getattr(args, "no_archive", False):
         return None
-    configured = settings.load().get("archive")
+    stored = settings.load()
+    configured = stored.get("archive")
     extra = [("config", configured)] if configured else []
-    found = find_archive(jf, getattr(args, "archive", None),
-                         root=getattr(args, "archive_root", None),
+    root = getattr(args, "archive_root", None) or stored.get("archive_root")
+    found = find_archive(jf, getattr(args, "archive", None), root=root,
                          search=getattr(args, "search_archive", False), extra=extra)
     while not found:
         print("")
@@ -272,15 +290,20 @@ def _archive(args, jf) -> Optional[str]:
             print("  %s %s" % (t("arch_tried"), hint))
         for item in attempts():
             print("  - %s (%s) -> %s" % (item["path"], item["label"], item["status"]))
-        mode = _choose(t("archive_fix"),
-                       [("path", t("arch_path")), ("root", t("arch_root")), ("skip", t("arch_skip"))],
-                       back=t("back_menu"))
-        if mode == "skip":
+        try:
+            mode = _choose(t("archive_fix"),
+                           [("path", t("arch_path")), ("root", t("arch_root")),
+                            ("skip", t("arch_skip"))],
+                           back=t("back_menu"))
+            if mode == "skip":
+                return None
+            if mode == "path":
+                found = find_archive(jf, _ask_back(t("ask_path")))
+            else:
+                found = find_archive(jf, root=_ask_back(t("ask_root")), search=True)
+        except _Back:
+            # "back" at the first screen means "go online for now".
             return None
-        if mode == "path":
-            found = find_archive(jf, _ask_back(t("ask_path")))
-        else:
-            found = find_archive(jf, root=_ask_back(t("ask_root")), search=True)
         if found and not _NONINTERACTIVE[0] and _confirm(t("arch_save"), default=False):
             settings.save({"archive": found})
             print("  config: %s" % settings.config_path())
@@ -299,12 +322,16 @@ def _library(sess: Session) -> Optional[str]:
 
 
 def _limit() -> Optional[int]:
-    raw = _ask(t("limit"), "0", hint=_h("返回") + "，输a=全部")
-    if raw == "0":
-        raise _Back()
-    if raw.lower() == "a":
-        return None
-    return int(raw) if raw.isdigit() and int(raw) > 0 else None
+    """A number, "a" for all, or 0 to go back -- never guess."""
+    while True:
+        raw = _ask(t("limit"), "0", hint=_h(t("back_menu")) + ", " + t("all_hint"))
+        if raw in ("", "0"):
+            raise _Back()
+        if raw.lower() == "a":
+            return None
+        if raw.isdigit() and int(raw) > 0:
+            return int(raw)
+        print("  ? %s" % t("bad_limit"))
 
 
 def _series(sess: Session, library: Optional[str]) -> str:
@@ -317,7 +344,7 @@ def _series(sess: Session, library: Optional[str]) -> str:
     print("    0) %s" % t("back_menu"))
     while True:
         raw = _ask(t("pick_series"), "0")
-        if raw == "0":
+        if raw in ("", "0"):
             raise _Back()
         if raw.isdigit() and 1 <= int(raw) <= len(visible):
             return visible[int(raw) - 1]["Id"]
@@ -334,9 +361,9 @@ def _bulk_confirm(sess: Session, count: int) -> bool:
     """A change this large deserves a typed answer, not one keystroke."""
     if not sess.confirm(t("confirm_write")):
         return False
-    if count <= BULK_LIMIT or sess.assume_yes:
+    if count <= BULK_LIMIT:
         return True
-    raw = _ask("%s (%d)" % (t("bulk"), count), "0", hint="直接回车默认选0=取消")
+    raw = _ask("%s (%d)" % (t("bulk"), count), "0", hint=t("bulk_hint"))
     return raw == str(count)
 
 
@@ -344,10 +371,18 @@ def _lib(library: Optional[str]) -> str:
     return " --library %s" % library if library else ""
 
 
+def _cmd() -> str:
+    """The command the user actually typed: ``./jbmid`` in a checkout, else jbmid."""
+    name = os.path.basename(sys.argv[0] or "")
+    if name and not name.startswith("python"):
+        return name
+    return "jbmid"
+
+
 def _print_tail(sess: Session, backup: Optional[str], equivalent: str) -> None:
     if backup:
         print("%-12s: %s" % (t("backup"), backup))
-        print("%-12s: jbmid rollback %s" % (t("roll_cmd"), backup))
+        print("%-12s: %s rollback %s" % (t("roll_cmd"), _cmd(), backup))
     print("%-12s: %s" % (t("equiv"), equivalent))
 
 
@@ -358,12 +393,20 @@ def _flow_verify(sess: Session) -> None:
         report = run_verify_offline(sess.jf, sess.archive, library=library, out=out)
     else:
         report = run_verify(sess.jf, sess.bgm, library=library, out=out)
-    counts = report.get("counts") or {}
+    counts = {
+        "ids": report.get("checked"),
+        "unknown": report.get("unknown"),
+        "duplicate": report.get("duplicate"),
+        "low-sim": report.get("low_similarity"),
+        "disorder": report.get("disorder"),
+        "foreign": report.get("foreign_subject"),
+        "season-ids": len(report.get("season_rows") or []),
+        "spans": len(report.get("span_rows") or []),
+    }
     print("")
-    for key in ("ids", "unknown", "duplicate", "low_similarity", "disorder",
-                "foreign_subject", "anchor_unused", "season_ids", "season_spans"):
-        if key in counts:
-            print("  %-16s %s" % (key.replace("_", "-"), counts.get(key)))
+    for key, value in counts.items():
+        if value is not None:
+            print("  %-16s %s" % (key, value))
     print("  %-16s %s" % ("report", out))
 
 
@@ -392,9 +435,10 @@ def _flow_episodes(sess: Session, library: Optional[str] = None,
     print("")
     print("  %-16s %s" % (t("written"), stats["written"],
                            ))
-    equivalent = "jbmid scan%s%s%s && jbmid apply %s" % (
-        _lib(library), " --series-id %s" % series_id if series_id else "",
-        " --limit %d" % limit if limit else "", out)
+    equivalent = "%s scan%s%s%s && %s apply %s --backup %s%s" % (
+        _cmd(), _lib(library), " --series-id %s" % series_id if series_id else "",
+        " --limit %d" % limit if limit else "", _cmd(), out, backup,
+        " --refresh" if refresh else "")
     _print_tail(sess, backup if os.path.exists(backup) else None, equivalent)
 
 
@@ -417,8 +461,9 @@ def _flow_seasons(sess: Session, library: Optional[str] = None,
     run_seasons(sess.jf, sess.bgm, library=library, all_series=True, dry_run=False,
                 backup_path=backup, series_ids=ids)
     _print_tail(sess, backup if os.path.exists(backup) else None,
-                "jbmid anchor --seasons --all%s%s" % (
-                    _lib(library), " --series-id %s" % series_id if series_id else ""))
+                "%s anchor --seasons --all%s%s --backup %s" % (
+                    _cmd(), _lib(library), " --series-id %s" % series_id if series_id else "",
+                    backup))
 
 
 def _flow_specials(sess: Session, library: Optional[str] = None,
@@ -426,7 +471,7 @@ def _flow_specials(sess: Session, library: Optional[str] = None,
     library = library if library is not None else _library(sess)
     limit = None if series_id else _limit()
     out = sess.report_path("specials")
-    clear = False if sess.assume_yes else sess.confirm(t("clear_borrowed"))
+    clear = False if sess.assume_yes else _confirm(t("clear_borrowed"), default=False)
     report = run_specials(sess.jf, sess.bgm, library=library, limit=limit, out=out,
                           series_ids=[series_id] if series_id else None,
                           clear_borrowed=clear)
@@ -444,9 +489,9 @@ def _flow_specials(sess: Session, library: Optional[str] = None,
     backup = sess.backup_path("specials")
     apply_report(sess.jf, report, backup_path=backup)
     _print_tail(sess, backup if os.path.exists(backup) else None,
-                "jbmid special%s%s%s && jbmid apply %s" % (
-                    _lib(library), " --series-id %s" % series_id if series_id else "",
-                    " --clear-borrowed" if clear else "", out))
+                "%s special%s%s%s && %s apply %s --backup %s" % (
+                    _cmd(), _lib(library), " --series-id %s" % series_id if series_id else "",
+                    " --clear-borrowed" if clear else "", _cmd(), out, backup))
 
 
 def _flow_sync(sess: Session) -> None:
@@ -461,10 +506,17 @@ def _flow_sync(sess: Session) -> None:
     print("  %-16s %s" % ("exit", preview.get("exit")))
     for step in preview.get("steps") or []:
         print("  %-16s %s" % (step.get("step"), "ok" if step.get("ok") else step.get("error")))
-    if not sess.confirm(t("confirm_write")):
+    if preview.get("exit"):
+        print(t("preview_failed"))
+        _print_tail(sess, None, "%s sync%s%s --dry-run" % (
+            _cmd(), _lib(library), " --limit %d" % limit if limit else ""))
+        return
+    planned = sum(int((step.get("stats") or {}).get("written") or 0)
+                  for step in preview.get("steps") or [])
+    if not _bulk_confirm(sess, planned):
         print(t("cancelled"))
-        _print_tail(sess, None, "jbmid sync%s%s --dry-run" % (
-            _lib(library), " --limit %d" % limit if limit else ""))
+        _print_tail(sess, None, "%s sync%s%s --dry-run" % (
+            _cmd(), _lib(library), " --limit %d" % limit if limit else ""))
         return
     result = run_sync(sess.jf, sess.bgm, archive=sess.archive, library=library, limit=limit,
                       dry_run=False, backup_dir=backup_dir, out_dir=backup_dir)
@@ -472,8 +524,12 @@ def _flow_sync(sess: Session) -> None:
     print("  %-16s %s" % ("exit", result.get("exit")))
     for step in result.get("steps") or []:
         print("  %-16s %s" % (step.get("step"), "ok" if step.get("ok") else step.get("error")))
-    _print_tail(sess, result.get("backup"),
-                "jbmid sync%s%s" % (_lib(library), " --limit %d" % limit if limit else ""))
+    backups = result.get("backups") or []
+    for path in backups:
+        print("%-12s: %s" % (t("backup"), path))
+    _print_tail(sess, backups[0] if backups else None,
+                "%s sync%s%s --backup-dir %s" % (
+                    _cmd(), _lib(library), " --limit %d" % limit if limit else "", backup_dir))
 
 
 def _is_backup(path: str) -> bool:
@@ -498,6 +554,8 @@ def _flow_rollback(sess: Session) -> None:
         return
     for index, name in enumerate(names[:15], 1):
         print("  %3d) %s" % (index, name))
+    if len(names) > 15:
+        print("  (%s)" % (t("more_backups") % 15))
     raw = _ask(t("pick_backup"), "0")
     if raw == "0":
         raise _Back()
@@ -511,17 +569,20 @@ def _flow_rollback(sess: Session) -> None:
             rows = len(json.load(fh))
     except (OSError, ValueError):
         rows = 0
+    print("  %s" % t("rollback_warn"))
     if not _bulk_confirm(sess, rows):
         print(t("cancelled"))
         return
     rollback(sess.jf, path)
-    _print_tail(sess, None, "jbmid rollback %s" % path)
+    _print_tail(sess, None, "%s rollback %s" % (_cmd(), path))
 
 
 def _flow_config(sess: Session) -> None:
     data = settings.load()
     print("")
     print("  config: %s" % settings.config_path())
+    if settings.LAST_ERROR:
+        print("          %s" % t("config_bad"))
     for key in settings.KEYS:
         print("  %-13s: %s" % (key, data.get(key) or "(unset)"))
     mode = _choose(t("config"), [("archive", "archive"), ("archive_root", "archive_root"),
@@ -531,7 +592,9 @@ def _flow_config(sess: Session) -> None:
         settings.unset(key)
         print("  unset: %s" % key)
         return
-    value = _ask(mode, data.get(mode, ""))
+    value = _ask(mode, data.get(mode, ""), hint=_h(t("back_menu")))
+    if value == "0":
+        return
     if value:
         settings.save({mode: os.path.abspath(os.path.expanduser(value)) if mode != "url" else value})
         print("  saved: %s = %s" % (mode, value))
@@ -591,7 +654,12 @@ def run(args) -> int:
     _NONINTERACTIVE[0] = bool(getattr(args, "yes", False))
     if _NONINTERACTIVE[0]:
         print(t("noninteractive"))
-    sess = _open(args)
+    try:
+        sess = _open(args)
+    except _Back:
+        # the first screen's "back" means "not now", not a crash
+        print(t("bye"))
+        return 0
     if sess is None:
         return 1
     _banner(sess)

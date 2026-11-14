@@ -13,7 +13,19 @@
   `jbmid rollback` 命令和等价的非交互命令。非 TTY 拒绝执行（除非 `--yes`），`--lang en` 切英文菜单。
 - **向导导航**：方括号里写清「直接回车选什么」，而 `0` 恒为返回/退出/取消；子菜单按 0 回主菜单而不退出；
   流程做完直接回菜单。输入流结束（EOF）单独用退出码 3，不再和 Ctrl-C 混用。
-- **配置文件**：新增 `jbmid config`，把 `archive` / `archive_root` / `url` 存进
+- **向导健壮性（评审后修）**：档案页面按 0 回到在线（不再抛 `_Back` 崩掉）；`--yes` 且没有 Key 时
+  直接给一句提示，不再弹无法应答的 `getpass`；体检显示真实计数（`checked/unknown/duplicate/low-sim/
+  disorder/foreign`、季级与横跨季行数）；`--write` 不会把「清空借用」默认翻成是；`sync` 预览失败就停，
+  不再问写入；等价命令带上真实可执行前缀与 `--backup` / `--refresh`。
+- **诊断与错误**：`-v`（子命令前后都可以）打印每个 HTTP 请求、状态码与字节数；CLI 不再抛 traceback，
+  401 / 404 / 连不上 / 报表文件不存在各给一行结论；裸跑 `jbmid` 打印帮助并返回 0。
+- **档案探测**：显式 `--archive` 不可用时打印 `ignore` 并继续找下一个候选（此前会静默退回在线）；
+  `JBMID_ARCHIVE_SEARCH=off` 可关掉有界搜索；不再把工作目录下的 `_local/archive` 当候选。
+- **配置文件**：坏掉的 JSON 不再被静默当成空文件——读时打一行警告并记进 `LAST_ERROR`，写入前把原文件
+  留成 `.bad`；`--unset` 在没有配置文件时不再凭空创建。
+- **`sync` 备份**：同名备份文件已存在时自动加时间戳轮换，结果里带 `backups` / `backup` 路径，向导据此
+  打印还原命令。
+- **`jbmid config` 子命令**：把 `archive` / `archive_root` / `url` 存进
   `~/.config/jellyfin-bangumi-ids/config.json`（Windows `%APPDATA%`，`JBMID_CONFIG_DIR` 可改，
   权限 0600）。只存路径，**不存 API Key**；`--unset` 删单项，不带参数只显示。`--url` 的取值顺序
   变成 `--url` → `JF_URL` → 配置文件 → 默认值。

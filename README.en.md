@@ -180,7 +180,7 @@ offline archive (chapter 6); when no archive is found it prints the paths it tri
 to type a path, give the host mount point, or go online.
 
 The specials flow also asks whether to clear specials that borrow a main-episode id (default `N`,
-same as `--clear-borrowed`); reports go to `_local/backups/`, and after a write it asks whether to
+same as `--clear-borrowed`); reports and backups land in the current directory (`--backup-dir` changes it), and after a write it asks whether to
 refresh those items (default `N`, same as `--refresh`). Above 50 changes a single `y` is not enough: you have to type the count back. Restoring a backup goes
 through the same threshold. Each write ends with three lines: the backup file, the
 `jbmid rollback <backup>` command, and the equivalent non-interactive command you can paste into cron.
@@ -190,8 +190,9 @@ Interface rule: **the bracket spells out what Enter picks**, and `0` always mean
 cancel" — Enter never performs a write on your behalf. In a submenu `0` returns to the main menu (it
 does not quit), and a finished flow drops you straight back into the menu.
 
-Exit codes: `0` finished, `1` cannot reach Jellyfin, `2` no terminal and no `--yes`, `3` input ended
-(a script that closed stdin), `130` Ctrl-C.
+Exit codes: `0` finished, `1` cannot reach Jellyfin or the API key was rejected, `2` no terminal and
+no `--yes`, `3` input ended (a script that closed stdin), `130` Ctrl-C. A failure prints one
+actionable line instead of a traceback; add `-v` to see every HTTP request, status and byte count.
 
 ### 4.2 `scan`: look before you leap
 
@@ -299,7 +300,7 @@ jbmid verify --library Anime --fail-on season-ids,dup # exit 1 on a hit (cron / 
 Field meanings are in [chapter 5](#5-season-ids-why-they-have-to-be-fixed-too); `--fail-on` accepts
 `unknown dup low-sim disorder foreign anchors season-ids season-spans none`.
 
-### 4.9 `protect` / `doctor`
+### 4.9 `protect` / `doctor` / `config`
 
 ```bash
 jbmid protect     # sets TrustExistedBangumiId = True so refreshes stop overwriting
@@ -446,7 +447,7 @@ mode 0600, and **never the API key** (that is `--api-key` / `JF_API_KEY` only). 
 `jbmid config --unset archive` to drop one value; `jbmid config` alone just prints them.
 
 The SQLite index lives in `~/.cache/jellyfin-bangumi-ids/` (`JBMID_CACHE` overrides it), about 150 MB, and
-the source files stay read-only. The archive refreshes every 14 days; when it is stale the live API wins.
+the source files stay read-only. The archive is maintained by the plugin's "update offline database" task (roughly every two weeks); when it is stale the live API wins.
 Anything the archive cannot answer (new episodes, relations, title search) falls back to the online API.
 
 ## 7. Safety
@@ -527,7 +528,7 @@ movies.
 ## 10. Development
 
 ```bash
-PYTHONPATH=src python -m unittest discover -s tests   # 170 cases, fully offline (if not pip install -e .)
+PYTHONPATH=src python -m unittest discover -s tests   # 184 cases, fully offline (if not pip install -e .)
 ```
 
 CI runs the same suite on Python 3.8 / 3.10 / 3.12. Layout:

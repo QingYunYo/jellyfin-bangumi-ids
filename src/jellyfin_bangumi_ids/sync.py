@@ -8,6 +8,7 @@ everything was written.  Running them by hand means five chances to skip a step,
 from __future__ import annotations
 
 import os
+import time
 from typing import Any, Dict, List, Optional
 
 from .anchor import run_seasons
@@ -27,6 +28,22 @@ def _join(directory: Optional[str], name: str) -> str:
 
 
 def _prepare(path: str) -> None:
+    folder = os.path.dirname(os.path.abspath(path))
+    if folder and not os.path.isdir(folder):
+        os.makedirs(folder)
+
+
+def _prepare_backup(path: str) -> None:
+    """Make room for a backup without destroying the previous undo point.
+
+    A fixed file name would let a second ``sync`` overwrite the only record of
+    what the first one changed, so an existing file is moved aside first.
+    """
+    _prepare(path)
+    if os.path.isfile(path):
+        stamp = time.strftime("%Y%m%d-%H%M%S")
+        base = path[:-5] if path.endswith(".json") else path
+        os.replace(path, "%s.%s.json" % (base, stamp))
     folder = os.path.dirname(os.path.abspath(path))
     if folder and not os.path.isdir(folder):
         os.makedirs(folder)
@@ -55,7 +72,8 @@ def run_sync(jf, bgm, archive: Optional[str] = None, library: Optional[str] = No
     ``dry_run`` only prints: no provider id and no backup file is written.  The JSON
     reports of the scans are still produced, because verify and apply read them.
     """
-    result: Dict[str, Any] = {"steps": [], "exit": 0, "failed_step": None}
+    result: Dict[str, Any] = {"steps": [], "exit": 0, "failed_step": None,
+                              "backups": [], "backup": None}
 
     # 1. scan -- decide the ids and write the report the next steps consume.
     scan_out = _join(out_dir, "jbmid-report.json")
@@ -77,7 +95,7 @@ def run_sync(jf, bgm, archive: Optional[str] = None, library: Optional[str] = No
     # 2. apply -- write the episode ids.
     stats = {"written": 0, "failed": 0, "skipped": 0}
     backup = _join(backup_dir, "jbmid-backup.json")
-    _prepare(backup)
+    _prepare_backup(backup)
     try:
         apply_report(jf, report, backup_path=backup, dry_run=dry_run, refresh=refresh,
                      stats=stats)
@@ -87,13 +105,16 @@ def run_sync(jf, bgm, archive: Optional[str] = None, library: Optional[str] = No
     _line(2, "apply", "%s %d episodes, %d failed, %d unchanged%s"
           % ("would write" if dry_run else "wrote", stats["written"], stats["failed"],
              stats["skipped"], " -- stopped" if failed else ""), failed=failed)
+    if not dry_run and os.path.exists(backup):
+        result["backups"].append(backup)
+        result["backup"] = backup
     result["steps"].append({"step": "apply", "ok": not failed, "stats": stats})
     if failed:
         return _fail(result, "apply")
 
     # 3. anchor --seasons -- the plugin reports 在看 with the season id.
     seasons_backup = _join(backup_dir, "jbmid-anchor-backup.json")
-    _prepare(seasons_backup)
+    _prepare_backup(seasons_backup)
     try:
         seasons = run_seasons(jf, bgm, library=library, all_series=not series_ids,
                               dry_run=dry_run, force=force, clear_spans=clear_spans,
@@ -106,6 +127,8 @@ def run_sync(jf, bgm, archive: Optional[str] = None, library: Optional[str] = No
           % (len(seasons.get("issues") or []), written,
              "written" if not dry_run else "would be written",
              " -- %d failed" % seasons["failed"] if failed else ""), failed=failed)
+    if not dry_run and os.path.exists(seasons_backup):
+        result["backups"].append(seasons_backup)
     result["steps"].append({"step": "anchor", "ok": not failed, "seasons": seasons})
     if failed:
         return _fail(result, "anchor")
@@ -120,7 +143,7 @@ def run_sync(jf, bgm, archive: Optional[str] = None, library: Optional[str] = No
         return _stop(result, 4, "special", str(exc))
     special_stats = {"written": 0, "failed": 0, "skipped": 0}
     special_backup = _join(backup_dir, "jbmid-backup-sp.json")
-    _prepare(special_backup)
+    _prepare_backup(special_backup)
     try:
         apply_report(jf, special_report, backup_path=special_backup, dry_run=dry_run,
                      refresh=refresh, stats=special_stats)
@@ -133,6 +156,8 @@ def run_sync(jf, bgm, archive: Optional[str] = None, library: Optional[str] = No
              special_summary.get("specials_cleared", 0),
              "would write" if dry_run else "wrote", special_stats["written"],
              " -- %d failed" % special_stats["failed"] if failed else ""), failed=failed)
+    if not dry_run and os.path.exists(special_backup):
+        result["backups"].append(special_backup)
     result["steps"].append({"step": "special", "ok": not failed,
                             "summary": special_summary, "stats": special_stats})
     if failed:

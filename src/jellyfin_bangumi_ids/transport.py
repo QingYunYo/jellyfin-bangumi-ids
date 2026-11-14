@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 import socket
 import ssl
+import sys
 import time
 import urllib.error
 import urllib.parse
@@ -11,6 +12,21 @@ import urllib.request
 from typing import Any, Dict, Optional
 
 USER_AGENT = "jellyfin-bangumi-ids/1.0 (+https://github.com/)"
+
+
+VERBOSE = False
+
+
+def set_verbose(on: bool = True) -> None:
+    """``-v``: print every request so a hang can be told apart from a slow API."""
+    global VERBOSE
+    VERBOSE = bool(on)
+
+
+def _trace(message: str) -> None:
+    if VERBOSE:
+        sys.stderr.write("[http] %s\n" % message)
+        sys.stderr.flush()
 
 
 class NetError(Exception):
@@ -59,6 +75,7 @@ def request(
     retries: int = 0,
 ) -> bytes:
     """GET/POST with optional exponential backoff. Returns the raw body."""
+    _trace("%s %s" % (method or ("POST" if body is not None else "GET"), url))
     attempt = 0
     last: Optional[Exception] = None
     while attempt <= retries:
@@ -69,9 +86,12 @@ def request(
             req.add_header(key, value)
         try:
             with urllib.request.urlopen(req, timeout=timeout) as resp:
-                return resp.read()
+                payload = resp.read()
+                _trace("  -> %s %d B" % (getattr(resp, "status", "?"), len(payload)))
+                return payload
         except urllib.error.HTTPError as exc:
             text = exc.read().decode("utf-8", "replace")
+            _trace("  -> HTTP %d" % exc.code)
             if exc.code in (429, 500, 502, 503, 504) and attempt <= retries:
                 last = exc
                 time.sleep(1.5 * attempt)

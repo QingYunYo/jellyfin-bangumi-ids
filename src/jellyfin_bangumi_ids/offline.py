@@ -88,14 +88,15 @@ def _candidates_from_jellyfin(jf) -> List[str]:
 
 
 def _candidates_from_repo() -> List[str]:
-    """A checkout keeps its own copy of the archive in ``_local/archive``."""
+    """A checkout may keep a copy of the archive in ``_local/archive``.
+
+    Only the checkout's own directory is considered: resolving against the working
+    directory would let ``jbmid`` pick up an unrelated archive just because it was
+    started from somewhere else.
+    """
     here = os.path.dirname(os.path.abspath(__file__))
     repo = os.path.dirname(os.path.dirname(here))  # src/jellyfin_bangumi_ids -> repo root
-    out = [os.path.join(repo, "_local", "archive")]
-    cwd = os.path.join(os.getcwd(), "_local", "archive")
-    if cwd not in out:
-        out.append(cwd)
-    return out
+    return [os.path.join(repo, "_local", "archive")]
 
 
 def _candidates_from_root(root: Optional[str], remote: List[str]) -> List[str]:
@@ -152,6 +153,11 @@ def attempts() -> List[Dict[str, str]]:
     return [dict(item) for item in LAST_ATTEMPTS]
 
 
+def _env_flag(name: str) -> bool:
+    """Truthy env vars: anything except '', 0, no, false, off."""
+    return os.environ.get(name, "").strip().lower() not in ("", "0", "no", "false", "off")
+
+
 def _probe(label: str, path: Optional[str]) -> Optional[str]:
     if not path:
         return None
@@ -170,43 +176,56 @@ def find_archive(jf=None, explicit: Optional[str] = None, root: Optional[str] = 
 
     Order: ``--archive`` -> ``JBMID_ARCHIVE`` -> extra (config file) -> a copy
     inside the checkout -> the host equivalent of Jellyfin's data path (via
-    ``--archive-root`` / ``JBMID_ARCHIVE_ROOT``) -> Jellyfin's own path.
+    ``--archive-root`` / ``JBMID_ARCHIVE_ROOT``) -> Jellyfin's own path -> a
+    bounded search.
 
     A path that was given but is unusable is recorded and skipped instead of
     aborting the search: one stale environment variable must not silently send
-    a slow online run at the user.
+    a slow online run at the user.  When that happens the resolved archive is
+    announced, because writing to one archive while the user pointed at another
+    is worse than being slow.
     """
     del LAST_ATTEMPTS[:]
+    explicit_bad = bool(explicit) and not looks_like_archive(explicit)
+
+    def _done(path: Optional[str]) -> Optional[str]:
+        if path and explicit_bad:
+            print("ignore        : --archive %s is unusable; using %s"
+                  % (explicit, path), file=sys.stderr)
+        return path
+
     for label, path in (("--archive", explicit), (ARCHIVE_ENV, os.environ.get(ARCHIVE_ENV))):
         found = _probe(label, path)
         if found:
-            return found
+            return _done(found)
     for label, path in extra or []:
         found = _probe(label, path)
         if found:
-            return found
-    for label, path in (("repo", p) for p in _candidates_from_repo()):
-        found = _probe(label, path)
+            return _done(found)
+    for path in _candidates_from_repo():
+        found = _probe("repo", path)
         if found:
-            return found
+            return _done(found)
     remote = _candidates_from_jellyfin(jf) if jf is not None else []
     root = root or os.environ.get(ARCHIVE_ROOT_ENV)
     if root and remote:
-        for label, path in (("archive-root", p) for p in _candidates_from_root(root, remote)):
-            found = _probe(label, path)
+        for path in _candidates_from_root(root, remote):
+            found = _probe("archive-root", path)
             if found:
-                return found
+                return _done(found)
     if jf is not None:
         for path in remote:
             found = _probe("jellyfin", path)
             if found:
-                return found
-    if root and (search or os.environ.get(ARCHIVE_SEARCH_ENV)):
+                return _done(found)
+    if root and (search or _env_flag(ARCHIVE_SEARCH_ENV)):
         found = _probe("search", search_archive(root))
         if found:
-            return found
+            return _done(found)
+    if explicit_bad:
+        print("ignore        : --archive %s is unusable; falling back to the online API"
+              % explicit, file=sys.stderr)
     return None
-
 
 
 class ArchiveIndex:

@@ -15,6 +15,8 @@ APP = "jellyfin-bangumi-ids"
 FILENAME = "config.json"
 KEYS = ("archive", "archive_root", "url")
 
+LAST_ERROR: list = []
+
 
 def config_dir() -> str:
     explicit = os.environ.get("JBMID_CONFIG_DIR")
@@ -32,12 +34,21 @@ def config_path() -> str:
 
 
 def load() -> Dict[str, str]:
+    """Read the file; a missing file is normal, a broken one is reported once."""
+    path = config_path()
     try:
-        with open(config_path(), encoding="utf-8") as fh:
+        with open(path, encoding="utf-8") as fh:
             raw = json.load(fh)
-    except (OSError, ValueError):
+    except FileNotFoundError:
+        return {}
+    except OSError as exc:
+        _warn(path, exc)
+        return {}
+    except ValueError as exc:
+        _warn(path, exc)
         return {}
     if not isinstance(raw, dict):
+        _warn(path, ValueError("top level is not an object"))
         return {}
     out = {}
     for key in KEYS:
@@ -47,9 +58,22 @@ def load() -> Dict[str, str]:
     return out
 
 
+def _warn(path: str, exc: Exception) -> None:
+    """Report a broken file instead of silently pretending it is empty."""
+    LAST_ERROR[:] = ["%s (%s)" % (path, exc)]
+    print("config: %s (%s)" % (path, exc), file=sys.stderr)
+
+
 def save(values: Dict[str, str]) -> str:
     path = config_path()
     data = load()
+    if LAST_ERROR and os.path.exists(path) and not os.path.exists(path + ".bad"):
+        # Never throw away a file the user may have hand-edited.
+        try:
+            os.replace(path, path + ".bad")
+        except OSError:
+            pass
+    LAST_ERROR[:] = []
     for key, value in values.items():
         if key not in KEYS:
             continue
@@ -69,7 +93,6 @@ def save(values: Dict[str, str]) -> str:
 
 
 def unset(*keys: str) -> str:
-    data = load()
-    for key in keys:
-        data.pop(key, None)
+    if not os.path.exists(config_path()):
+        return config_path()
     return save({key: "" for key in keys})

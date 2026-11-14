@@ -18,7 +18,7 @@ from .offline import (attempts, archive_hint, ArchiveIndex, OfflineBangumi, find
 from .scan import apply_report, log, rollback, run_scan, run_specials
 from .season import load_mapping, scan_seasons
 from .sync import run_sync
-from .transport import force_ipv4
+from .transport import HttpError, NetError, force_ipv4, set_verbose
 from .verify import fail_on_breaches, run_verify, run_verify_offline
 from .wizard import run as run_wizard
 
@@ -32,7 +32,8 @@ def common(parser: argparse.ArgumentParser) -> None:
                         help="Jellyfin API key (env JF_API_KEY)")
     parser.add_argument("--ipv4", action="store_true",
                         help="force IPv4 lookups (fixes 20 s hangs on hosts with broken IPv6)")
-    parser.add_argument("--timeout", type=float, default=20.0)
+    parser.add_argument("--timeout", type=float, default=20.0,
+                        help="per-request timeout in seconds (default: 20)")
     parser.add_argument("--archive", metavar="DIR",
                         help="Bangumi plugin archive directory (default: auto-detect, env JBMID_ARCHIVE)")
     parser.add_argument("--archive-root", metavar="DIR",
@@ -42,7 +43,8 @@ def common(parser: argparse.ArgumentParser) -> None:
                         help="also look for bangumi/archive below --archive-root (slower)")
     parser.add_argument("--no-archive", action="store_true",
                         help="ignore the offline archive and always call api.bgm.tv")
-    parser.add_argument("-v", "--verbose", action="store_true")
+    parser.add_argument("-v", "--verbose", action="store_true",
+                        help="print every HTTP request and the resolved data source")
 
 
 def server_url(args: argparse.Namespace) -> str:
@@ -65,10 +67,11 @@ def data_source(args: argparse.Namespace, jf) -> Optional[str]:
     """Resolved archive directory, or None when the online API is in charge."""
     if getattr(args, "no_archive", False):
         return None
-    configured = settings.load().get("archive")
+    stored = settings.load()
+    configured = stored.get("archive")
     extra = [("config", configured)] if configured else []
-    return find_archive(jf, getattr(args, "archive", None),
-                        root=getattr(args, "archive_root", None),
+    root = getattr(args, "archive_root", None) or stored.get("archive_root")
+    return find_archive(jf, getattr(args, "archive", None), root=root,
                         search=getattr(args, "search_archive", False), extra=extra)
 
 
@@ -154,7 +157,7 @@ def cmd_anchor(args: argparse.Namespace) -> int:
 
 
 def cmd_apply(args: argparse.Namespace) -> int:
-    jf, _ = clients_with_source(args)
+    jf, _ = clients(args)
     with open(args.report, encoding="utf-8") as fh:
         report = json.load(fh)
     apply_report(jf, report, backup_path=None if args.no_backup else args.backup,
@@ -261,7 +264,7 @@ def cmd_protect(args: argparse.Namespace) -> int:
 
 
 def cmd_doctor(args: argparse.Namespace) -> int:
-    jf, bgm = clients_with_source(args)
+    jf, bgm = clients(args)
     info = jf.get("/System/Info") or {}
     print("jellyfin  : %s (%s)" % (info.get("Version"), args.url))
     archive = data_source(args, jf)
@@ -269,6 +272,7 @@ def cmd_doctor(args: argparse.Namespace) -> int:
         try:
             index = ArchiveIndex(archive, verbose=False)
             counts = index.counts()
+            bgm = OfflineBangumi(index, bgm, label=archive)
             print("archive   : %s (%d subjects, %d episodes)" % (
                 archive, counts["subjects"], counts["episodes"]))
         except Exception as exc:
@@ -281,7 +285,7 @@ def cmd_doctor(args: argparse.Namespace) -> int:
             print("archive   : none (online only)")
         for item in attempts():
             print("            tried %s (%s) -> %s" % (item["path"], item["label"], item["status"]))
-        root = getattr(args, "archive_root", None)
+        root = getattr(args, "archive_root", None) or settings.load().get("archive_root")
         if not root:
             print("            if Jellyfin runs in Docker, pass --archive-root DIR so a "
                   "container path like /config/data/bangumi/archive can be mapped")
@@ -325,6 +329,8 @@ def cmd_config(args: argparse.Namespace) -> int:
     data = settings.load()
     print("config    : %s (%s)" % (settings.config_path(),
                                    "exists" if os.path.exists(settings.config_path()) else "missing"))
+    if settings.LAST_ERROR:
+        print("            %s" % settings.LAST_ERROR[0])
     for key in settings.KEYS:
         print("%-13s: %s" % (key, data.get(key) or "(unset)"))
     if not data:
@@ -337,25 +343,27 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="jbmid", description="Fix Bangumi episode ids inside Jellyfin.")
     parser.add_argument("--version", action="version", version="jbmid " + __version__)
+    parser.add_argument("-v", "--verbose", action="store_true", dest="verbose_global",
+                        help="print every HTTP request (also accepted after a subcommand)")
     sub = parser.add_subparsers(dest="command", required=True)
 
     p = sub.add_parser("scan", help="scan a library and write a report")
     common(p)
     p.add_argument("--library", help="library name, e.g. Anime (case-insensitive)")
-    p.add_argument("--limit", type=int)
+    p.add_argument("--limit", type=int, help="only the first N series of the library")
     p.add_argument("--threshold", type=float, default=0.45, help="name similarity gate (0-1)")
     p.add_argument("--no-search", action="store_true", help="do not search bgm by title")
     p.add_argument("--series-id", action="append", metavar="ITEM_ID",
                    help="select a series by its Jellyfin item id (repeatable); "
                         "skips the by-name lookup")
-    p.add_argument("--out", default="jbmid-report.json")
+    p.add_argument("--out", default="jbmid-report.json", help="where to write the report")
     p.set_defaults(func=cmd_scan)
 
     p = sub.add_parser("special", help="match SP/OVA episodes too (type=1 on Bangumi)")
     common(p)
     p.add_argument("--library", help="library name, e.g. Anime (case-insensitive)")
-    p.add_argument("--limit", type=int)
-    p.add_argument("--out", default="jbmid-specials.json")
+    p.add_argument("--limit", type=int, help="only the first N series of the library")
+    p.add_argument("--out", default="jbmid-specials.json", help="where to write the report")
     p.add_argument("--series-id", action="append", metavar="ITEM_ID",
                    help="select a series by its Jellyfin item id (repeatable)")
     p.add_argument("--clear-borrowed", action="store_true",
@@ -371,9 +379,10 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--id", type=int, help="explicit Bangumi subject id")
     p.add_argument("--clear", action="store_true", help="remove the series-level id")
     p.add_argument("--force", action="store_true", help="accept an id that fails the title check")
-    p.add_argument("--backup", default="jbmid-anchor-backup.json")
-    p.add_argument("--no-backup", action="store_true")
-    p.add_argument("--dry-run", action="store_true")
+    p.add_argument("--backup", default="jbmid-anchor-backup.json",
+                   help="where to write the undo file")
+    p.add_argument("--no-backup", action="store_true", help="do not write an undo file")
+    p.add_argument("--dry-run", action="store_true", help="print the plan, write nothing")
     p.add_argument("--seasons", action="store_true",
                    help="repair season-level ids from the ids on their episodes")
     p.add_argument("--all", action="store_true",
@@ -384,10 +393,10 @@ def build_parser() -> argparse.ArgumentParser:
 
     p = sub.add_parser("apply", help="write the ids from a scan report")
     common(p)
-    p.add_argument("report")
-    p.add_argument("--backup", default="jbmid-backup.json")
-    p.add_argument("--no-backup", action="store_true")
-    p.add_argument("--dry-run", action="store_true")
+    p.add_argument("report", help="report written by scan or special")
+    p.add_argument("--backup", default="jbmid-backup.json", help="where to write the undo file")
+    p.add_argument("--no-backup", action="store_true", help="do not write an undo file")
+    p.add_argument("--dry-run", action="store_true", help="print the plan, write nothing")
     p.add_argument("--only", help="only series whose name contains this")
     p.add_argument("--refresh", action="store_true",
                    help="after writing, ask Jellyfin to refresh the changed items "
@@ -396,7 +405,8 @@ def build_parser() -> argparse.ArgumentParser:
 
     p = sub.add_parser("season", help="map local seasons to Bangumi subjects by hand")
     common(p)
-    p.add_argument("--map", required=True)
+    p.add_argument("--map", required=True,
+                   help="JSON: {\"series name\": {\"1\": {\"subjects\": [id, ...]}}}")
     p.add_argument("--series-id", metavar="ITEM_ID",
                    help="only this series (by Jellyfin item id); the map is keyed by name")
     p.add_argument("--threshold", type=float, default=0.45)
@@ -500,14 +510,56 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def _explain(exc: Exception) -> None:
+    """One actionable line per class of failure; the traceback needs -v."""
+    text = str(exc)
+    if isinstance(exc, HttpError):
+        if exc.status == 401:
+            print("error: the Jellyfin API key was rejected (401). Create a new one under "
+                  "Dashboard -> API Keys and pass it as --api-key or JF_API_KEY.",
+                  file=sys.stderr)
+        elif exc.status == 404 and "/System/Info" in text:
+            print("error: %s answered 404. Check the base URL (no /web suffix) and the port."
+                  % text.split(" for ")[-1].split(":")[0], file=sys.stderr)
+        else:
+            print("error: %s" % text, file=sys.stderr)
+        return
+    if isinstance(exc, NetError):
+        print("error: cannot reach %s" % text, file=sys.stderr)
+        print("       check --url and the container port; on hosts with broken IPv6 add --ipv4",
+              file=sys.stderr)
+        return
+    if isinstance(exc, FileNotFoundError):
+        print("error: %s does not exist -- scan first, then apply its report" % exc.filename,
+              file=sys.stderr)
+        return
+    if isinstance(exc, OSError):
+        print("error: %s" % exc, file=sys.stderr)
+        return
+    print("error: %s" % text, file=sys.stderr)
+
+
 def main(argv: Optional[List[str]] = None) -> int:
     parser = build_parser()
-    args = parser.parse_args(argv)
+    raw = sys.argv[1:] if argv is None else list(argv)
+    if not raw:
+        parser.print_help()
+        return 0
+    args = parser.parse_args(raw)
+    if getattr(args, "verbose", False) or getattr(args, "verbose_global", False):
+        set_verbose(True)
     try:
         return args.func(args)
     except KeyboardInterrupt:
         log("interrupted")
         return 130
+    except SystemExit as exc:
+        return exc.code if isinstance(exc.code, int) else 2
+    except (NetError, HttpError, OSError) as exc:
+        if getattr(args, "verbose", False) or getattr(args, "verbose_global", False):
+            raise
+        _explain(exc)
+        return 1
 
 
 if __name__ == "__main__":

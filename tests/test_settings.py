@@ -1,8 +1,10 @@
 """The small config file: where it lives, what it stores, how it fails."""
+import io
 import json
 import os
 import tempfile
 import unittest
+from contextlib import redirect_stderr
 from unittest import mock
 
 from jellyfin_bangumi_ids import settings
@@ -58,3 +60,38 @@ class SettingsTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class BrokenFileTest(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.env = mock.patch.dict(os.environ, {"JBMID_CONFIG_DIR": self.tmp.name})
+        self.env.start()
+        settings.LAST_ERROR[:] = []
+
+    def tearDown(self):
+        settings.LAST_ERROR[:] = []
+        self.env.stop()
+        self.tmp.cleanup()
+
+    def test_broken_json_is_reported_not_swallowed(self):
+        with open(settings.config_path(), "w", encoding="utf-8") as fh:
+            fh.write("{not json")
+        stderr = io.StringIO()
+        with redirect_stderr(stderr):
+            data = settings.load()
+        self.assertEqual(data, {})
+        self.assertTrue(settings.LAST_ERROR)
+        self.assertIn("config", stderr.getvalue())
+
+    def test_save_keeps_the_broken_file_as_dot_bad(self):
+        with open(settings.config_path(), "w", encoding="utf-8") as fh:
+            fh.write("{not json")
+        with redirect_stderr(io.StringIO()):
+            settings.save({"url": "http://jf:8096"})
+        self.assertTrue(os.path.exists(settings.config_path() + ".bad"))
+        self.assertEqual(settings.load()["url"], "http://jf:8096")
+
+    def test_unset_on_a_missing_file_creates_nothing(self):
+        settings.unset("archive")
+        self.assertFalse(os.path.exists(settings.config_path()))

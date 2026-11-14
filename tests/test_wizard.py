@@ -126,7 +126,7 @@ class FlowTest(unittest.TestCase):
         report = {"summary": {"series_ok": 1, "series_review": 0, "episodes_to_write": 0}}
         with mock.patch.object(wizard, "run_scan", return_value=report), \
                 mock.patch.object(wizard, "apply_report") as apply, \
-                mock.patch.object(wizard, "_ask", return_value=""), \
+                mock.patch.object(wizard, "_ask", return_value="a"), \
                 mock.patch.object(wizard, "_confirm") as confirm:
             out = run_output(wizard._flow_episodes, self.sess)
         self.assertFalse(apply.called)
@@ -137,7 +137,7 @@ class FlowTest(unittest.TestCase):
         report = {"summary": {"series_ok": 1, "series_review": 0, "episodes_to_write": 3}}
         with mock.patch.object(wizard, "run_scan", return_value=report), \
                 mock.patch.object(wizard, "apply_report") as apply, \
-                mock.patch.object(wizard, "_ask", return_value=""), \
+                mock.patch.object(wizard, "_ask", return_value="a"), \
                 mock.patch.object(wizard, "_confirm", return_value=False):
             out = run_output(wizard._flow_episodes, self.sess)
         self.assertFalse(apply.called)
@@ -152,7 +152,7 @@ class FlowTest(unittest.TestCase):
 
         with mock.patch.object(wizard, "run_scan", return_value=report), \
                 mock.patch.object(wizard, "apply_report", side_effect=write_backup) as apply, \
-                mock.patch.object(wizard, "_ask", return_value=""), \
+                mock.patch.object(wizard, "_ask", return_value="a"), \
                 mock.patch.object(wizard, "_confirm", return_value=True):
             out = run_output(wizard._flow_episodes, self.sess)
         self.assertTrue(apply.called)
@@ -179,21 +179,21 @@ class FlowTest(unittest.TestCase):
         report = {"summary": {"specials_matched": 2, "specials_cleared": 0, "episodes_to_write": 2}}
         with mock.patch.object(wizard, "run_specials", return_value=report), \
                 mock.patch.object(wizard, "apply_report") as apply, \
-                mock.patch.object(wizard, "_ask", return_value=""), \
+                mock.patch.object(wizard, "_ask", return_value="a"), \
                 mock.patch.object(wizard, "_confirm", return_value=True):
             run_output(wizard._flow_specials, self.sess)
         self.assertTrue(apply.called)
 
     def test_sync_preview_is_dry_by_default(self):
         with mock.patch.object(wizard, "run_sync", return_value={"exit": 0, "steps": []}) as sync, \
-                mock.patch.object(wizard, "_ask", return_value=""), \
+                mock.patch.object(wizard, "_ask", return_value="a"), \
                 mock.patch.object(wizard, "_confirm", return_value=False):
             run_output(wizard._flow_sync, self.sess)
         self.assertTrue(sync.call_args.kwargs["dry_run"])
 
     def test_sync_writes_when_confirmed(self):
         with mock.patch.object(wizard, "run_sync", return_value={"exit": 0, "steps": []}) as sync, \
-                mock.patch.object(wizard, "_ask", return_value=""), \
+                mock.patch.object(wizard, "_ask", return_value="a"), \
                 mock.patch.object(wizard, "_confirm", return_value=True):
             run_output(wizard._flow_sync, self.sess)
         self.assertFalse(sync.call_args.kwargs["dry_run"])
@@ -298,3 +298,88 @@ class ArchiveTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class RegressionTest(unittest.TestCase):
+    """The four promises the review found broken: back, --yes, counters, gates."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.sess = session(self.tmp.name)
+        wizard._LANG[0] = "en"
+        wizard._NONINTERACTIVE[0] = False
+        settings.LAST_ERROR[:] = []
+
+    def tearDown(self):
+        wizard._LANG[0] = "zh"
+        wizard._NONINTERACTIVE[0] = False
+        self.tmp.cleanup()
+
+    def _args(self, **kw):
+        base = {"url": None, "api_key": "k", "timeout": 5, "archive": None,
+                "archive_root": None, "search_archive": False, "no_archive": False,
+                "yes": False, "write": False, "lang": None, "ipv4": False}
+        base.update(kw)
+        return mock.Mock(**base)
+
+    def test_back_on_the_archive_screen_means_online(self):
+        with mock.patch.object(wizard, "find_archive", return_value=None), \
+                mock.patch.object(wizard, "archive_hint", return_value=""), \
+                mock.patch.object(wizard, "_choose", side_effect=wizard._Back), \
+                redirect_stdout(io.StringIO()):
+            self.assertIsNone(wizard._archive(self._args(), self.sess.jf))
+
+    def test_back_on_the_first_screen_is_not_a_crash(self):
+        tty = mock.Mock()
+        tty.isatty.return_value = True
+        with mock.patch.object(wizard.sys, "stdin", tty), \
+                mock.patch.object(wizard, "_open", side_effect=wizard._Back), \
+                redirect_stdout(io.StringIO()):
+            self.assertEqual(wizard.run(self._args()), 0)
+
+    def test_yes_without_a_key_never_calls_getpass(self):
+        wizard._NONINTERACTIVE[0] = True
+        with mock.patch.object(wizard.getpass, "getpass", side_effect=AssertionError), \
+                redirect_stdout(io.StringIO()):
+            self.assertIsNone(wizard._open(self._args(api_key="")))
+
+    def test_verify_prints_the_real_counters(self):
+        report = {"checked": 10, "unknown": 1, "duplicate": 0, "low_similarity": 3,
+                  "disorder": 2, "foreign_subject": 0,
+                  "season_rows": [{"a": 1}], "span_rows": []}
+        with mock.patch.object(wizard, "_choose", return_value=""), \
+                mock.patch.object(wizard, "run_verify_offline", return_value=report):
+            out = run_output(wizard._flow_verify, self.sess)
+        self.assertIn("low-sim", out)
+        self.assertIn("season-ids", out)
+        self.assertIn("1", out)
+
+    def test_limit_rejects_letters_instead_of_meaning_all(self):
+        with mock.patch("builtins.input", side_effect=["x", "7"]), \
+                redirect_stdout(io.StringIO()):
+            self.assertEqual(wizard._limit(), 7)
+
+    def test_write_flag_does_not_pre_answer_clearing_specials(self):
+        self.sess.write_default = True
+        report = {"summary": {"specials_matched": 0, "specials_cleared": 0,
+                              "episodes_to_write": 0}}
+        with mock.patch.object(wizard, "run_specials", return_value=report) as spec, \
+                mock.patch.object(wizard, "_confirm", return_value=False) as confirm, \
+                mock.patch.object(wizard, "_choose", return_value=""), \
+                mock.patch.object(wizard, "_ask", return_value="a"), \
+                redirect_stdout(io.StringIO()):
+            wizard._flow_specials(self.sess)
+        self.assertEqual(confirm.call_args.kwargs.get("default"), False)
+        self.assertFalse(spec.call_args.kwargs["clear_borrowed"])
+
+    def test_sync_does_not_ask_to_write_when_the_preview_failed(self):
+        preview = {"exit": 1, "steps": [{"step": "scan", "ok": False, "error": "boom"}],
+                   "backups": []}
+        with mock.patch.object(wizard, "run_sync", return_value=preview) as sync, \
+                mock.patch.object(wizard, "_confirm") as confirm, \
+                mock.patch.object(wizard, "_choose", return_value=""), \
+                mock.patch.object(wizard, "_ask", return_value="a"), \
+                redirect_stdout(io.StringIO()):
+            wizard._flow_sync(self.sess)
+        self.assertEqual(sync.call_count, 1)
+        self.assertFalse(confirm.called)
