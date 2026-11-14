@@ -383,3 +383,37 @@ class RegressionTest(unittest.TestCase):
             wizard._flow_sync(self.sess)
         self.assertEqual(sync.call_count, 1)
         self.assertFalse(confirm.called)
+
+
+class PlannedCountTest(unittest.TestCase):
+    """A sync preview must count season rewrites too, not just episode writes."""
+
+    def test_counts_stats_and_seasons(self):
+        preview = {"steps": [
+            {"step": "apply", "stats": {"written": 5}},
+            {"step": "anchor", "seasons": {"issues": [{"a": 1}, {"b": 2}, {"c": 3}]}},
+            {"step": "special", "stats": {"written": 2}},
+        ]}
+        self.assertEqual(wizard._planned_count(preview), 10)
+
+    def test_missing_keys_count_as_zero(self):
+        self.assertEqual(wizard._planned_count({"steps": [{"step": "scan", "ok": True}]}), 0)
+
+
+class BackupDirTest(unittest.TestCase):
+    """--backup-dir / --out-dir must land where the operator asked."""
+
+    def test_backup_and_out_dir_override_the_default(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            sess = Session(FakeJf(), mock.MagicMock(), None, {"Version": "12"},
+                           False, False,
+                           backup_dir=os.path.join(tmp, "b"), out_dir=os.path.join(tmp, "o"))
+            backup = sess.backup_path("episodes")
+            report = sess.report_path("scan")
+        self.assertEqual(os.path.dirname(backup), os.path.join(tmp, "b"))
+        self.assertEqual(os.path.dirname(report), os.path.join(tmp, "o"))
+
+    def test_default_is_local_backups_under_the_working_directory(self):
+        sess = Session(FakeJf(), mock.MagicMock(), None, {"Version": "12"}, False, False)
+        self.assertEqual(sess.backup_dir, os.path.join(os.getcwd(), "_local", "backups"))
+        self.assertEqual(sess.out_dir, sess.backup_dir)

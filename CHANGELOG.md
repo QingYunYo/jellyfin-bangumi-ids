@@ -4,6 +4,12 @@
 
 ## 0.1.5（未发布）
 
+- **发布前修正（评审后）**：`jbmid` 顶层不再吞掉 `SystemExit` 里的文字——缺少 API Key 时打印
+  `missing API key: pass --api-key or set JF_API_KEY` 并返回 `1`（此前静默退出 `2`，和「没有终端」撞车）；
+  `User-Agent` 改成真实版本号与仓库地址；`jbmid wizard` 支持 `--backup-dir` / `--out-dir`（默认仍是
+  `./_local/backups/`）；「一条龙」的 50 条阈值把季级 `season-issues` 一并计入。
+- **文档**：第 6 章补齐环境变量表（`JF_URL` / `JF_API_KEY` / `JBMID_ARCHIVE` / `JBMID_ARCHIVE_ROOT` /
+  `JBMID_ARCHIVE_SEARCH` / `JBMID_CACHE` / `JBMID_CONFIG_DIR`），探测顺序由 5 档扩为 7 档。
 - **不用安装也能跑**：仓库根目录多了一个 `jbmid` 启动器（`./jbmid doctor`），外加
   `src/jellyfin_bangumi_ids/__main__.py`，于是 `PYTHONPATH=src python3 -m jellyfin_bangumi_ids` 也可用；
   Debian / NAS 上 PEP 668 拦掉 `pip install` 时直接跑仓库里的版本即可。

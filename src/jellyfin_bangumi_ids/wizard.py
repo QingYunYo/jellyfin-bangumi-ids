@@ -202,14 +202,20 @@ def _choose(prompt: str, options: List[Tuple[str, str]], back: Optional[str] = N
 
 class Session:
     def __init__(self, jf: Jellyfin, bgm, archive: Optional[str], info: Dict[str, Any],
-                 assume_yes: bool, write_default: bool):
+                 assume_yes: bool, write_default: bool,
+                 backup_dir: Optional[str] = None, out_dir: Optional[str] = None):
         self.jf = jf
         self.bgm = bgm
         self.archive = archive
         self.info = info
         self.assume_yes = assume_yes
         self.write_default = write_default
-        self.backup_dir = os.path.join(os.getcwd(), "_local", "backups")
+        # The wizard keeps the same default the subcommands use, but --backup-dir
+        # and --out-dir are honoured so a read-only working directory is not fatal.
+        self.backup_dir = os.path.abspath(os.path.expanduser(backup_dir)) if backup_dir \
+            else os.path.join(os.getcwd(), "_local", "backups")
+        self.out_dir = os.path.abspath(os.path.expanduser(out_dir)) if out_dir \
+            else self.backup_dir
 
     def backup_path(self, kind: str) -> str:
         os.makedirs(self.backup_dir, exist_ok=True)
@@ -217,9 +223,9 @@ class Session:
         return os.path.join(self.backup_dir, "%s-%s.json" % (kind, stamp))
 
     def report_path(self, kind: str) -> str:
-        os.makedirs(self.backup_dir, exist_ok=True)
+        os.makedirs(self.out_dir, exist_ok=True)
         stamp = time.strftime("%Y%m%d-%H%M%S")
-        return os.path.join(self.backup_dir, "%s-%s-report.json" % (kind, stamp))
+        return os.path.join(self.out_dir, "%s-%s-report.json" % (kind, stamp))
 
     def confirm(self, prompt: str) -> bool:
         # --yes takes the default answer, and every write prompt defaults to no;
@@ -270,7 +276,9 @@ def _open(args) -> Optional[Session]:
     if archive:
         bgm = OfflineBangumi(ArchiveIndex(archive, verbose=False), bgm, label=archive)
     return Session(jf, bgm, archive, info, getattr(args, "yes", False),
-                   getattr(args, "write", False))
+                   getattr(args, "write", False),
+                   backup_dir=getattr(args, "backup_dir", None),
+                   out_dir=getattr(args, "out_dir", None))
 
 
 def _archive(args, jf) -> Optional[str]:
@@ -494,6 +502,20 @@ def _flow_specials(sess: Session, library: Optional[str] = None,
                     " --clear-borrowed" if clear else "", _cmd(), out, backup))
 
 
+def _planned_count(result: Dict[str, Any]) -> int:
+    """How many changes a sync preview promised.
+
+    ``apply`` and ``special`` report under ``stats``; ``anchor`` keeps its counts
+    under ``seasons``, so counting only ``stats`` would let a run that rewrites
+    200 season ids skip the typed-count gate.
+    """
+    total = 0
+    for step in result.get("steps") or []:
+        total += int((step.get("stats") or {}).get("written") or 0)
+        total += len((step.get("seasons") or {}).get("issues") or [])
+    return total
+
+
 def _flow_sync(sess: Session) -> None:
     library = _library(sess)
     limit = _limit()
@@ -511,8 +533,7 @@ def _flow_sync(sess: Session) -> None:
         _print_tail(sess, None, "%s sync%s%s --dry-run" % (
             _cmd(), _lib(library), " --limit %d" % limit if limit else ""))
         return
-    planned = sum(int((step.get("stats") or {}).get("written") or 0)
-                  for step in preview.get("steps") or [])
+    planned = _planned_count(preview)
     if not _bulk_confirm(sess, planned):
         print(t("cancelled"))
         _print_tail(sess, None, "%s sync%s%s --dry-run" % (

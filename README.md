@@ -169,7 +169,7 @@ jbmid wizard --yes      # 非交互：全部取默认值，写操作一律不执
 而是先把尝试过的路径和失败原因打出来，再让你选「手输路径 / 告诉宿主挂载点 / 先用在线」。
 
 番外流程会另外问一句「清空借用正片 ID 的番外？」（默认 `N`，等价于 `--clear-borrowed`）。报告与备份默认写在
-当前目录（`--backup-dir` 可改）；确认写入后还会问一句「写完后刷新这些条目？」（默认 `N`，等价于
+`./_local/backups/`（`--backup-dir` / `--out-dir` 可改）；确认写入后还会问一句「写完后刷新这些条目？」（默认 `N`，等价于
 `--refresh`）。一次改动超过 50 条时，光按 `y` 不够，要照着数字再敲一遍条数；还原备份同样走这个阈值。每次写入
 结束会打印三件事：备份文件、`jbmid rollback <备份>` 的还原命令、以及等价的非交互命令（方便你确认
 没问题后抄进 cron）。非交互环境（管道、CI）直接拒绝并返回 2，除非显式 `--yes`。
@@ -393,7 +393,9 @@ ID 反查条目」，两边都对——第 1 章那段日志对照就是这个�
 2. 环境变量 `JBMID_ARCHIVE`
 3. 配置文件：`jbmid config --archive DIR`
 4. 仓库内 `_local/archive`（自己拷一份档案时用）
-5. Jellyfin `/System/Info` 报告的 `DataPath` 在**当前机器上直接可读**时自动使用
+5. `--archive-root DIR` / `JBMID_ARCHIVE_ROOT`：把容器内路径映射到宿主机（见下）
+6. Jellyfin `/System/Info` 报告的 `DataPath` 在**当前机器上直接可读**时自动使用
+7. `--search-archive` / `JBMID_ARCHIVE_SEARCH=1`：在 `--archive-root` 下做有界搜索（兜底，较慢）
 
 **Jellyfin 跑在 Docker 里**：插件看到的是容器内路径（如 `/config/data/bangumi/archive`），
 在宿主机上并不存在。把宿主目录告诉工具，它会自己映射：
@@ -414,6 +416,20 @@ jbmid doctor
 `~/.config/jellyfin-bangumi-ids/config.json`（Windows 为 `%APPDATA%`，`JBMID_CONFIG_DIR` 可改），
 权限 0600，**不存 API Key**（API Key 只认 `--api-key` / `JF_API_KEY`）。
 `jbmid config --unset archive` 可删掉某一项，`jbmid config` 不带参数时只显示当前值。
+
+常用环境变量：
+
+| 变量 | 作用 | 等价参数 |
+| --- | --- | --- |
+| `JF_URL` | Jellyfin 地址 | `--url` |
+| `JF_API_KEY` | Jellyfin API Key（唯一凭据来源，不写进配置文件） | `--api-key` |
+| `JBMID_ARCHIVE` | 档案目录 | `--archive` |
+| `JBMID_ARCHIVE_ROOT` | 容器路径对应的宿主机目录 | `--archive-root` |
+| `JBMID_ARCHIVE_SEARCH` | 非空即开启有界搜索（`0`/`off` 关闭） | `--search-archive` |
+| `JBMID_CACHE` | SQLite 索引缓存目录 | 无 |
+| `JBMID_CONFIG_DIR` | 配置文件目录 | 无 |
+
+服务器地址的取值顺序：`--url` → `JF_URL` → `jbmid config --url` → 默认 `http://127.0.0.1:8096`。
 
 索引缓存放在 `~/.cache/jellyfin-bangumi-ids/`（`JBMID_CACHE` 可改），约 150 MB，只读源文件；
 档案由插件的「离线数据库更新」任务维护（约两周一次，以插件为准），过期时以在线 API 为准。档案里没有的条目（新集、关系图、按标题搜索）

@@ -497,6 +497,10 @@ def build_parser() -> argparse.ArgumentParser:
                    help="non-interactive: take every default (which never writes)")
     p.add_argument("--write", action="store_true",
                    help="pre-answer the write prompts with yes (still previews first)")
+    p.add_argument("--backup-dir", metavar="DIR",
+                   help="where the wizard writes undo files (default: ./_local/backups)")
+    p.add_argument("--out-dir", metavar="DIR",
+                   help="where the wizard writes reports (default: same as --backup-dir)")
     p.set_defaults(func=cmd_wizard)
 
     p = sub.add_parser("config", help="remember the archive path or the server URL")
@@ -545,16 +549,20 @@ def main(argv: Optional[List[str]] = None) -> int:
     if not raw:
         parser.print_help()
         return 0
-    args = parser.parse_args(raw)
-    if getattr(args, "verbose", False) or getattr(args, "verbose_global", False):
-        set_verbose(True)
     try:
+        args = parser.parse_args(raw)
+        if getattr(args, "verbose", False) or getattr(args, "verbose_global", False):
+            set_verbose(True)
         return args.func(args)
     except KeyboardInterrupt:
         log("interrupted")
         return 130
     except SystemExit as exc:
-        return exc.code if isinstance(exc.code, int) else 2
+        if isinstance(exc.code, int):
+            return exc.code
+        # argparse prints its own message; a raised SystemExit("...") would vanish.
+        print(exc.code, file=sys.stderr)
+        return 1
     except (NetError, HttpError, OSError) as exc:
         if getattr(args, "verbose", False) or getattr(args, "verbose_global", False):
             raise

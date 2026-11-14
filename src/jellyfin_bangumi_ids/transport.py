@@ -11,7 +11,10 @@ import urllib.parse
 import urllib.request
 from typing import Any, Dict, Optional
 
-USER_AGENT = "jellyfin-bangumi-ids/1.0 (+https://github.com/)"
+from . import __version__
+
+USER_AGENT = ("jellyfin-bangumi-ids/%s "
+              "(+https://github.com/QingYunYo/jellyfin-bangumi-ids)" % __version__)
 
 
 VERBOSE = False

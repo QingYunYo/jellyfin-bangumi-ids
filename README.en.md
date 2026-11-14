@@ -180,7 +180,7 @@ offline archive (chapter 6); when no archive is found it prints the paths it tri
 to type a path, give the host mount point, or go online.
 
 The specials flow also asks whether to clear specials that borrow a main-episode id (default `N`,
-same as `--clear-borrowed`); reports and backups land in the current directory (`--backup-dir` changes it), and after a write it asks whether to
+same as `--clear-borrowed`); reports and backups land in `./_local/backups/` (`--backup-dir` / `--out-dir` change it), and after a write it asks whether to
 refresh those items (default `N`, same as `--refresh`). Above 50 changes a single `y` is not enough: you have to type the count back. Restoring a backup goes
 through the same threshold. Each write ends with three lines: the backup file, the
 `jbmid rollback <backup>` command, and the equivalent non-interactive command you can paste into cron.
@@ -422,7 +422,9 @@ Lookup order (first hit wins):
 2. `JBMID_ARCHIVE` environment variable
 3. the config file: `jbmid config --archive DIR`
 4. a copy inside the checkout (`_local/archive`)
-5. Jellyfin's `DataPath` from `/System/Info`, when that path is readable **on this machine**
+5. `--archive-root DIR` / `JBMID_ARCHIVE_ROOT`: map container paths onto the host (below)
+6. Jellyfin's `DataPath` from `/System/Info`, when that path is readable **on this machine**
+7. `--search-archive` / `JBMID_ARCHIVE_SEARCH=1`: a bounded walk under `--archive-root` (fallback, slower)
 
 **Jellyfin in Docker**: the plugin sees container paths such as `/config/data/bangumi/archive`, which do
 not exist on the host. Point the tool at the host directory and it maps them for you:
@@ -445,6 +447,20 @@ prints every path it tried and why it failed (`missing` / `unreadable`) — fix 
 `~/.config/jellyfin-bangumi-ids/config.json` (`%APPDATA%` on Windows, override with `JBMID_CONFIG_DIR`),
 mode 0600, and **never the API key** (that is `--api-key` / `JF_API_KEY` only). Use
 `jbmid config --unset archive` to drop one value; `jbmid config` alone just prints them.
+
+Environment variables:
+
+| Variable | Meaning | Flag |
+| --- | --- | --- |
+| `JF_URL` | Jellyfin base URL | `--url` |
+| `JF_API_KEY` | Jellyfin API key (the only credential source; never written to the config file) | `--api-key` |
+| `JBMID_ARCHIVE` | archive directory | `--archive` |
+| `JBMID_ARCHIVE_ROOT` | host directory that holds Jellyfin's data mount | `--archive-root` |
+| `JBMID_ARCHIVE_SEARCH` | non-empty enables the bounded walk (`0`/`off` disables) | `--search-archive` |
+| `JBMID_CACHE` | SQLite index cache directory | none |
+| `JBMID_CONFIG_DIR` | config file directory | none |
+
+The server URL is resolved as `--url` → `JF_URL` → `jbmid config --url` → `http://127.0.0.1:8096`.
 
 The SQLite index lives in `~/.cache/jellyfin-bangumi-ids/` (`JBMID_CACHE` overrides it), about 150 MB, and
 the source files stay read-only. The archive is maintained by the plugin's "update offline database" task (roughly every two weeks); when it is stale the live API wins.
