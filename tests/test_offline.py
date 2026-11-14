@@ -3,7 +3,9 @@ import json
 import os
 import tempfile
 import unittest
+from unittest import mock
 
+from jellyfin_bangumi_ids import offline
 from jellyfin_bangumi_ids.offline import ArchiveIndex, OfflineBangumi, find_archive
 
 
@@ -131,15 +133,24 @@ class ArchiveTestCase(unittest.TestCase):
         self.assertEqual(len(api.calls), 2)
         self.assertEqual(bgm.api_hits, 2)
 
+    def no_repo_archive(self):
+        """A real checkout keeps _local/archive; tests must not see it."""
+        return mock.patch.object(offline, "_candidates_from_repo", lambda: [])
+
     def test_find_archive_prefers_explicit_and_env(self):
-        self.assertEqual(find_archive(None, self.dir), os.path.abspath(self.dir))
-        self.assertIsNone(find_archive(None, os.path.join(self.tmp, "nope")))
-        os.environ["JBMID_ARCHIVE"] = self.dir
-        try:
+        with self.no_repo_archive():
+            self.assertEqual(find_archive(None, self.dir), os.path.abspath(self.dir))
+            self.assertIsNone(find_archive(None, os.path.join(self.tmp, "nope")))
+            os.environ["JBMID_ARCHIVE"] = self.dir
+            try:
+                self.assertEqual(find_archive(None), os.path.abspath(self.dir))
+            finally:
+                os.environ.pop("JBMID_ARCHIVE", None)
+            self.assertIsNone(find_archive(None))
+
+    def test_find_archive_uses_repo_local_copy(self):
+        with mock.patch.object(offline, "_candidates_from_repo", lambda: [self.dir]):
             self.assertEqual(find_archive(None), os.path.abspath(self.dir))
-        finally:
-            os.environ.pop("JBMID_ARCHIVE", None)
-        self.assertIsNone(find_archive(None))
 
     def test_find_archive_uses_program_data_path(self):
         root = os.path.join(self.tmp, "config")
@@ -150,7 +161,8 @@ class ArchiveTestCase(unittest.TestCase):
             def get(self, path, params=None):
                 return {"ProgramDataPath": root, "InternalMetadataPath": os.path.join(root, "metadata")}
 
-        self.assertEqual(find_archive(Jf()), os.path.abspath(nested))
+        with self.no_repo_archive():
+            self.assertEqual(find_archive(Jf()), os.path.abspath(nested))
 
     def test_find_archive_reads_jellyfin_data_path(self):
         root = os.path.join(self.tmp, "jf")
@@ -162,13 +174,15 @@ class ArchiveTestCase(unittest.TestCase):
                 return {"InternalMetadataPath": os.path.join(root, "metadata"),
                         "DataPath": root}
 
-        self.assertEqual(find_archive(Jf()), os.path.abspath(nested))
+        with self.no_repo_archive():
+            self.assertEqual(find_archive(Jf()), os.path.abspath(nested))
 
         class JfNone(Jf):
             def get(self, path, params=None):
                 return {}
 
-        self.assertIsNone(find_archive(JfNone()))
+        with self.no_repo_archive():
+            self.assertIsNone(find_archive(JfNone()))
 
 if __name__ == "__main__":
     unittest.main()

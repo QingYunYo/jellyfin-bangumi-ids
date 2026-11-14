@@ -362,7 +362,8 @@ turning API calls into primary-key lookups:
 | full `verify` | ~40 minutes | ~18 seconds |
 | full `scan` | ~12 minutes | ~2 minutes the first time (builds the index), then ~19 seconds |
 
-Lookup order: `--archive DIR` → `JBMID_ARCHIVE` → auto-detect from `DataPath` in `/System/Info`. If the
+Lookup order: `--archive DIR` → `JBMID_ARCHIVE` → a copy inside the checkout (`_local/archive`) →
+auto-detect from `DataPath` in `/System/Info`. If the
 archive is missing, or an episode is not in it, the online API is used instead. The first run builds a
 ~150 MB SQLite index inside the archive directory (source files are read-only). The archive refreshes every
 14 days; when it is stale, the live API wins.

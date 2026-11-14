@@ -339,7 +339,8 @@ ID 反查条目」，两边都对——第 1 章那段日志对照就是这个�
 | `verify` 全库 | 约 40 分钟 | 约 18 秒 |
 | `scan` 全库 | 约 12 分钟 | 首次建索引约 2 分钟，之后约 19 秒 |
 
-查找顺序：`--archive DIR` → 环境变量 `JBMID_ARCHIVE` → `/System/Info` 的 `DataPath` 自动探测。
+查找顺序：`--archive DIR` → 环境变量 `JBMID_ARCHIVE` → 仓库内 `_local/archive`（自己拷一份档案时用）
+→ `/System/Info` 的 `DataPath` 自动探测。
 档案找不到或某一集不在档案里，自动回退在线 API。首次使用会在档案目录建一个约 150 MB 的 SQLite 索引
 （只读源文件）。档案每 14 天更新一次，太旧时以在线 API 为准。
 

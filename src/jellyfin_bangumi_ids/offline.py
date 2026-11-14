@@ -84,13 +84,27 @@ def _candidates_from_jellyfin(jf) -> List[str]:
     return out
 
 
+def _candidates_from_repo() -> List[str]:
+    """A checkout keeps its own copy of the archive in ``_local/archive``."""
+    here = os.path.dirname(os.path.abspath(__file__))
+    repo = os.path.dirname(os.path.dirname(here))  # src/jellyfin_bangumi_ids -> repo root
+    out = [os.path.join(repo, "_local", "archive")]
+    cwd = os.path.join(os.getcwd(), "_local", "archive")
+    if cwd not in out:
+        out.append(cwd)
+    return out
+
+
 def find_archive(jf=None, explicit: Optional[str] = None) -> Optional[str]:
-    """Explicit flag → env var → Jellyfin's own data path → nothing."""
+    """Explicit flag → env var → repo-local copy → Jellyfin's data path → nothing."""
     for path in (explicit, os.environ.get(ARCHIVE_ENV)):
         if looks_like_archive(path):
             return os.path.abspath(os.path.expanduser(path))
         if path:
             return None  # user pointed somewhere wrong: do not guess instead
+    for path in _candidates_from_repo():
+        if looks_like_archive(path):
+            return os.path.abspath(path)
     if jf is not None:
         for path in _candidates_from_jellyfin(jf):
             if looks_like_archive(path):
