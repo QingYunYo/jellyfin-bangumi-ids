@@ -11,18 +11,105 @@
 
 ## 目录
 
-- [1. 它改什么：两类 ID](#1-它改什么两类-id)
-- [2. 安装与 API Key](#2-安装与-api-key)
-- [3. 快速开始](#3-快速开始)
-- [4. 模式与用法](#4-模式与用法)
-- [5. 季级 ID：为什么必须一起修](#5-季级-id为什么必须一起修)
-- [6. 数据源与配置：离线档案、Docker、config](#6-数据源与配置离线档案dockerconfig)
-- [7. 安全性](#7-安全性)
-- [8. 常见问题](#8-常见问题)
-- [9. 实现](#9-实现)
-- [10. 开发](#10-开发)
+- [1. 安装与快速开始](#1-安装与快速开始)
+- [2. 它改什么：两类 ID](#2-它改什么两类-id)
+- [3. 模式与用法](#3-模式与用法)
+- [4. 季级 ID：为什么必须一起修](#4-季级-id为什么必须一起修)
+- [5. 数据源与配置：离线档案、Docker、config](#5-数据源与配置离线档案dockerconfig)
+- [6. 安全性](#6-安全性)
+- [7. 常见问题](#7-常见问题)
+- [8. 实现](#8-实现)
+- [9. 开发](#9-开发)
+- [License](#license)
 
-## 1. 它改什么：两类 ID
+## 1. 安装与快速开始
+
+只依赖 Python 标准库，Python ≥ 3.8：
+
+```bash
+pip install git+https://github.com/QingYunYo/jellyfin-bangumi-ids.git
+```
+
+装不上也不要紧（NAS / Debian 的 Python 常带 PEP 668 保护），克隆下来直接用仓库自带的启动器，
+一个系统目录都不碰：
+
+```bash
+git clone https://github.com/QingYunYo/jellyfin-bangumi-ids.git
+cd jellyfin-bangumi-ids
+./jbmid doctor        # 等价于装好后的 jbmid doctor
+```
+
+想装进虚拟环境：`python3 -m venv .venv && . .venv/bin/activate && pip install -e .`。
+
+### 1.1 第一次运行：回答三个问题
+
+```bash
+./jbmid               # 装过就是 jbmid
+```
+
+还没有配置时，它直接进首次设置：先用 `/System/Info/Public` 确认地址可达（不需要 Key），
+再问 Key，最后问档案——所以地址写错时不会再让你白输一遍 Key。
+
+1. **Jellyfin 地址**——媒体服务器的地址（默认 8096 端口），**不是 Bangumi 的网址**；
+   填 IP 也行，`192.168.1.10:8096` 会自动补成 `http://192.168.1.10:8096`。
+2. **Jellyfin API Key**——Jellyfin 控制台 → API 密钥 → 新建。输入时可见，粘错能当场发现；
+   回车后只显示打码摘要（`e76c********84d0`），并提示长度是否像 32 位。
+3. **离线档案**（可选）——自动探测，找不到可以直接跳过，之后再补。
+
+验证通过后写进 `~/.config/jellyfin-bangumi-ids/config.json`（权限 0600），之后的命令直接用，
+**不用再 export 任何变量**。不想让 Key 落盘加 `--no-save-key`；介意肩窥再加 `--hide-key`。
+
+> 目录不可写时它会明说「没保存」并给出 `JBMID_CONFIG_DIR` 的替代写法，不会假装成功。
+> 以后要改：`jbmid config`（终端里进编辑菜单），`jbmid config --test` 检查连通性。
+
+连不上时它会按原因分诊：地址类的错就只重问地址，401/403 就只重问 Key，其他情况让你选。
+
+### 1.2 然后：用菜单，或者用子命令
+
+跑起来就是八项菜单，第一次建议「1 体检 → 2 修集级 → 3 修季级」走一遍，出问题用「6 回滚」：
+
+```text
+  1  体检（verify + 报告）
+  2  修集级 ID（scan → apply）
+  3  修季级 ID（anchor --seasons）
+  4  修番外 ID（special → apply）
+  5  一条龙（sync）
+  6  回滚（从备份还原）
+  7  单剧（按剧修）
+  8  配置（config）
+  0  退出
+```
+
+每个写操作都先给预览、再问一次：**方括号里既写动作用什么键，也写回车默认选什么**，`0` 永远是返回/取消。
+改完会打印备份文件、还原命令和等价的子命令，方便抄进脚本。要进 cron 就别用菜单，直接用 1.3 的子命令。
+
+### 1.3 子命令（脚本或精确控制）
+
+```bash
+jbmid scan --library 动漫 --limit 3 --out report.json   # 只出报告；--library 不分大小写，省略=全部库
+jbmid apply report.json --dry-run                       # 先干跑
+jbmid apply report.json --backup jbmid-backup.json      # 真写，旧值自动备份
+jbmid rollback jbmid-backup.json                        # 出问题一键还原
+```
+
+```text
+$ jbmid scan --library 动漫 --limit 3
+scanning 3 series from library 动漫
+[1/3] OK   2.5次元的诱惑           to write 0
+[2/3] OK   86-不存在的战区-        to write 0
+[3/3] OK   拔作岛                  to write 0
+series ok      : 3
+series review  : 0
+episodes       : 0 to write
+```
+
+三个数字：`series ok` 可以对齐、`series review` 不确定（**不写**，看 `reason`）、`episodes to write` 要改的集数。
+报告里每部剧带 `anchor` / `chain` / `notes`，`review` 的会写明原因（如 `size mismatch 25 local vs 51 pool`）。
+
+`review` 超过一两部时先看第 3 章选模式；ID 写完了插件还报错，看第 4 章（季级）。
+
+
+## 2. 它改什么：两类 ID
 
 Jellyfin 的**每一集**和**每一季**都可以带一个 Bangumi ID，它们管的事不一样：
 
@@ -61,119 +148,13 @@ jbmid verify  --library 动漫                   # 两类一起体检
 | 半季没有 ID | `apply` 只补空值，不动已有 |
 | 剧集 ID 挂到另一部作品 | 锚点校验 + 季级投票；必要时 `anchor --series` 换锚点 |
 | 播出顺序 ≠ 集号顺序 | `verify` 报 `disorder`，交给你确认 |
-| 一个本地季对两个条目 | `anchor --seasons --clear-spans` 清空季级 ID（见第 5 章） |
+| 一个本地季对两个条目 | `anchor --seasons --clear-spans` 清空季级 ID（见第 4 章） |
 | 集名带 `SP` 被误判成番外 | 已按 `SP\d+` 识别（`（Sp...）` 不再误伤） |
 
-## 2. 安装与 API Key
-
-只依赖 Python 标准库，Python ≥ 3.8：
-
-```bash
-pip install git+https://github.com/QingYunYo/jellyfin-bangumi-ids.git
-# 本地开发
-git clone https://github.com/QingYunYo/jellyfin-bangumi-ids.git
-cd jellyfin-bangumi-ids && pip install -e .
-```
-
-装完有 `jbmid` 命令。**装不上也不要紧**：Debian / NAS 上的 Python 常带 PEP 668
-（`externally-managed-environment`）保护，这时克隆下来直接用仓库自带的启动器，一个系统目录都不碰：
-
-```bash
-git clone https://github.com/QingYunYo/jellyfin-bangumi-ids.git
-cd jellyfin-bangumi-ids
-./jbmid doctor        # 等价于装好后的 jbmid doctor
-./jbmid wizard
-```
-
-真想装又不想动系统 Python，就开个虚拟环境：
-
-```bash
-python3 -m venv .venv && . .venv/bin/activate && pip install -e .
-```
-
-不安装时也可以 `PYTHONPATH=src python3 -m jellyfin_bangumi_ids <命令>`，效果一样。Jellyfin 里「控制台 → API 密钥」建一个，
-然后：
-
-```bash
-export JF_URL=http://127.0.0.1:8096
-export JF_API_KEY=你的密钥
-jbmid doctor          # 连通性 + 数据源 + 插件状态
-```
-
-`doctor` 会告诉你用的是在线 API 还是离线档案、插件是否已开 `TrustExistedBangumiId`。
-
-### 2.1 把连接信息存一次就够了
-
-第一次用直接跑 `jbmid setup`（或者在终端里直接敲 `jbmid`，它也会先带你设置）。它会问三件事，当场验证：
-
-1. **Jellyfin 地址**：`http://127.0.0.1:8096`。注意这是 **Jellyfin 媒体服务器**的地址（默认 8096 端口），
-   不是 Bangumi 的网址；Jellyfin 装在哪台机器就填那台的 IP，例如 `http://192.168.1.10:8096`。
-2. **API Key**：Jellyfin 控制台 → API 密钥 → 新建。
-3. **离线档案**（可选）：自动探测，找不到可以直接跳过，之后再补。
-
-回答完会连一次做校验，然后写进 `~/.config/jellyfin-bangumi-ids/config.json`（权限 0600），
-之后 `jbmid scan`、`jbmid wizard` 等命令直接用，**不用再 export 任何变量**。
-不想让 Key 落盘就加 `--no-save-key`，或继续用环境变量。
-
-所有命令仍接受 `--url` / `--api-key` 覆盖，也支持 `--ipv4`（容器里只通 IPv4 时）和 `--timeout`。
-改已有配置：`jbmid config`（终端里会进编辑菜单）、`jbmid config --test` 检查连通性，详见第 6 章。
-
-## 3. 快速开始
-
-第一次用，按习惯选一条。
-
-### 3.1 不想背参数：用向导
-
-```bash
-./jbmid wizard        # 装过就是 jbmid，没装就是仓库里的 ./jbmid
-```
-
-菜单八项，第一次建议按「1 体检 → 2 修集级 → 3 修季级」走一遍，出问题用「6 回滚」：
-
-```text
-  1  体检（verify + 报告）
-  2  修集级 ID（scan → apply）
-  3  修季级 ID（anchor --seasons）
-  4  修番外 ID（special → apply）
-  5  一条龙（sync）
-  6  回滚（从备份还原）
-  7  单剧（按剧修）
-  8  配置（config）
-  0  退出
-```
-
-每个写操作都先给预览、再问一次：**方括号里是回车默认值，`0` 永远是返回/取消**。改完会打印备份文件、
-还原命令和等价的子命令，方便抄进脚本。要进 cron 就别用向导，直接用 3.2 的子命令。
-
-### 3.2 要精确控制：子命令
-
-```bash
-jbmid scan --library 动漫 --limit 3 --out report.json   # 只出报告；--library 不分大小写，省略=全部库
-jbmid apply report.json --dry-run                       # 先干跑
-jbmid apply report.json --backup jbmid-backup.json      # 真写，旧值自动备份
-jbmid rollback jbmid-backup.json                        # 出问题一键还原
-```
-
-```text
-$ jbmid scan --library 动漫 --limit 3
-scanning 3 series from library 动漫
-[1/3] OK   2.5次元的诱惑           to write 0
-[2/3] OK   86-不存在的战区-        to write 0
-[3/3] OK   拔作岛                  to write 0
-series ok      : 3
-series review  : 0
-episodes       : 0 to write
-```
-
-三个数字：`series ok` 可以对齐、`series review` 不确定（**不写**，看 `reason`）、`episodes to write` 要改的集数。
-报告里每部剧带 `anchor` / `chain` / `notes`，`review` 的会写明原因（如 `size mismatch 25 local vs 51 pool`）。
-
-`review` 超过一两部时先看第 4 章选模式；ID 写完了插件还报错，看第 5 章（季级）。
-
-## 4. 模式与用法
+## 3. 模式与用法
 
 选模式的唯一硬标准是**写不写**——拿不准就加 `--dry-run`。下表按「动不动你的库」分组；
-单个模式的细节见 4.1–4.10，**真实修复时怎么排序见 [4.11](#411-综合用法真实修复时的顺序)**。
+单个模式的细节见 3.1–3.10，**真实修复时怎么排序见 [3.11](#311-综合用法真实修复时的顺序)**。
 
 | 分组 | 模式 | 干什么 | 写不写 |
 | --- | --- | --- | --- |
@@ -191,7 +172,7 @@ episodes       : 0 to write
 | 配置 | `protect` | 让插件别覆盖手写 ID | 改插件配置 |
 | 配置 | `config` | 记住档案路径 / 服务器地址 | 写配置文件 |
 
-### 4.1 `wizard`：不想背参数就用它
+### 3.1 `wizard`：不想背参数就用它
 
 `jbmid wizard` 把常用流程做成菜单，**每个写操作都先给预览、再问一次**，默认答案是「不写」。
 还没有配置过时它会先带你做一次设置（地址 / Key / 档案），以后直接进菜单；想重做用 `jbmid setup`：
@@ -204,7 +185,7 @@ jbmid wizard --yes      # 非交互：全部取默认值，写操作一律不执
 ```
 
 菜单有八项：体检、修集级、修季级、修番外、一条龙、回滚、单剧、配置。启动时先解析服务器地址
-（`--url` → `JF_URL` → `config` → 默认）与离线档案（顺序同第 6 章）；找不到档案时不是干问路径，
+（`--url` → `JF_URL` → `config` → 默认）与离线档案（顺序同第 5 章）；找不到档案时不是干问路径，
 而是先把尝试过的路径和失败原因打出来，再让你选「手输路径 / 告诉宿主挂载点 / 先用在线」。
 
 番外流程会另外问一句「清空借用正片 ID 的番外？」（默认 `N`，等价于 `--clear-borrowed`）。报告与备份默认写在
@@ -220,7 +201,7 @@ jbmid wizard --yes      # 非交互：全部取默认值，写操作一律不执
 `3` 输入流结束（喂完 stdin 的脚本）；`130` 被 Ctrl-C 打断。出任何错误只打一行结论和该改什么，
 想看完整请求就加 `-v`（打印每个 HTTP 请求、状态码与字节数）。
 
-### 4.2 `scan`：先看清全局，再动手
+### 3.2 `scan`：先看清全局，再动手
 
 最常用的入口：逐部剧找锚点、建池、按集名对齐、给出判定，**一个字都不写**。
 
@@ -242,7 +223,7 @@ jbmid scan --series-id 9a63c5f950cf05e5ba3796722a403f27
 `season 2 keeps its own subject 513878 (10/10 episodes)`。这条退路**只在整链失败时**启用——
 默认仍先整链，否则「一个季横跨两个条目」会被误拆成「这一季有自己的条目」。
 
-### 4.3 `apply` / `rollback`：报告落库与撤销
+### 3.3 `apply` / `rollback`：报告落库与撤销
 
 ```bash
 jbmid apply report.json --dry-run                 # 先看要改多少集
@@ -259,7 +240,7 @@ jbmid rollback jbmid-backup.json --dry-run
 `Name` / `Overview` / `PremiereDate` 不受影响；锁定字段也不会被覆盖。`season` / `auto` 同样接受
 `--refresh`。
 
-### 4.4 `season`：季划分对不上时
+### 3.4 `season`：季划分对不上时
 
 本地季数 ≠ 链上条目数、或顺序不同时用。JSON 写「第几季 = 哪些 subject」：
 
@@ -273,7 +254,7 @@ jbmid season --map map.json --dry-run
 
 `sp: true` 表示这一季按番外处理（对齐 Bangumi 的 `type=1` 集）。
 
-### 4.5 `auto`：一把梭
+### 3.5 `auto`：一把梭
 
 不指定锚点，按剧名搜条目、按集名对齐，然后直接写：
 
@@ -284,7 +265,7 @@ jbmid auto --library 动漫
 
 它最省事，也最需要看结果：每部剧都会打印 `method`（`name` / `season-map` / `stored` / `order`）。
 
-### 4.6 `special`：番外、OVA、总集篇
+### 3.6 `special`：番外、OVA、总集篇
 
 Season 0 和名字含 `番外|OVA|OAD|SP|总集篇|特典` 的集，对齐 Bangumi 的 `type=1` 集：
 
@@ -294,7 +275,7 @@ jbmid apply specials.json
 jbmid special --library 动漫 --clear-borrowed   # 清掉借用了正片 ID 的番外
 ```
 
-### 4.7 `anchor`：锚点本身错了
+### 3.7 `anchor`：锚点本身错了
 
 只修一部剧的锚点，也能修季级 ID：
 
@@ -307,7 +288,7 @@ jbmid anchor --library 动漫 --seasons --all --clear-spans    # 横跨季清空
 取值顺序：**集级反查 → 季级多数票 → 剧集自己的 ID → 标题搜索**，都要过标题校验；`--force` 接收可疑值，
 `--clear` 清空。
 
-### 4.8 `verify`：只读体检
+### 3.8 `verify`：只读体检
 
 ```bash
 jbmid verify --library 动漫                              # 一行汇总 + 分类明细
@@ -315,21 +296,21 @@ jbmid verify --library 动漫 --by-series                  # 按剧聚合，先�
 jbmid verify --library 动漫 --fail-on season-ids,dup     # 有命中就 exit 1（cron / CI 用）
 ```
 
-各字段含义见[第 5 章](#5-季级-id为什么必须一起修)；`--fail-on` 可选 `unknown dup low-sim
+各字段含义见[第 4 章](#4-季级-id为什么必须一起修)；`--fail-on` 可选 `unknown dup low-sim
 disorder foreign anchors season-ids season-spans none`。
 
-### 4.9 `protect` / `doctor`
+### 3.9 `protect` / `doctor`
 
 ```bash
 jbmid protect     # 把 TrustExistedBangumiId 设为 True，刷新不再覆盖
 jbmid doctor      # 连通性 / 数据源 / 插件状态
 ```
 
-`jbmid config`（记住路径）在[第 6 章](#6-数据源与配置离线档案dockerconfig)末尾。
+`jbmid config`（记住路径）在[第 5 章](#5-数据源与配置离线档案dockerconfig)末尾。
 
 两份 README 里的示例输出都来自 [`examples/`](examples/README.md)（真实报告与备份的节选，附字段说明）。
 
-### 4.10 `sync`：一条龙
+### 3.10 `sync`：一条龙
 
 把 4.11 那张顺序表里最常一起跑的五步串起来：`scan` → `apply` → `anchor --seasons` → `special` → `verify`。
 
@@ -344,7 +325,7 @@ jbmid sync --series-id 9a63c5f950cf05e5ba3796722a403f27   # 只处理一部
 cron / CI。`--backup-dir` 与 `--out-dir` 决定备份和中间报告放哪；同名备份已存在时会自动加时间戳
 轮换，不会覆盖上一次的还原点，结束时打印全部备份路径。
 
-### 4.11 综合用法：真实修复时的顺序
+### 3.11 综合用法：真实修复时的顺序
 
 实际使用时这几个模式是**混着用**的，不是挑一个跑完就完事。第一次上手按这个顺序走一遍：
 
@@ -372,7 +353,7 @@ cron / CI。`--backup-dir` 与 `--out-dir` 决定备份和中间报告放哪；�
 顺序不能反的三条原因：**集级 → 季级**（投票来源是集级 ID）、**集级 → 番外**（S0 借正片 ID 会让池不干净）、
 **修完 → 锁**（`protect` 锁早了会挡住你自己的后续修正）。
 
-## 5. 季级 ID：为什么必须一起修
+## 4. 季级 ID：为什么必须一起修
 
 Bangumi 插件上报「在看」时，subject 取自**这一集的父级**（季），不是这一集自己的 ID。所以：
 
@@ -410,7 +391,7 @@ $ jbmid anchor --library 动漫 --seasons --all --clear-spans --dry-run
 
 **为什么清空而不是挑一个**：一个季里 12 集属于 part A、13 集属于 part B，季级 ID 只能写一个。
 写 A，B 的 13 集上报到 A；写 B，A 的 12 集上报到 B。清空后 `PlaybackScrobbler` 退回「用这一集自己的
-ID 反查条目」，两边都对——第 1 章那段日志对照就是这个机制。
+ID 反查条目」，两边都对——第 2 章那段日志对照就是这个机制。
 
 **安全边界**：`--force` 只放宽「低置信」（少于 2 集、票数不足 60%），**不会**给横跨季写多数票
 （直接跳过），否则会把刚清空的那一半写回去。单集季可以用 `--force` 补 ID。
@@ -418,7 +399,7 @@ ID 反查条目」，两边都对——第 1 章那段日志对照就是这个�
 写回走读-改-写：GET 完整条目 → 只改 `ProviderIds.Bangumi` → POST → 回读确认，并检查相邻字段有没有
 被连带改掉；改了什么同时写进备份，`rollback` 可还原。季级备份里 `kind` 字段是 `season`。
 
-## 6. 数据源与配置：离线档案、Docker、config
+## 5. 数据源与配置：离线档案、Docker、config
 
 装了 Bangumi 插件并跑过「离线数据库更新」后，`{DataPath}/bangumi/archive/` 下有几份
 `.jsonlines`。本工具直接读它们，把在线请求换成主键查询：
@@ -453,7 +434,7 @@ jbmid doctor
 而不是静默退回在线、让你等 40 分钟。`jbmid doctor` 会打印每一条尝试过的路径和失败原因
 （`missing` / `unreadable`），照着补一条 `jbmid config --archive DIR` 即可。
 
-### 6.1 记住路径：`jbmid config`
+### 5.1 记住路径：`jbmid config`
 
 不用每次敲参数：
 
@@ -490,7 +471,7 @@ jbmid config --unset archive               # 删掉某一项
 档案由插件的「离线数据库更新」任务维护（约两周一次，以插件为准），过期时以在线 API 为准。档案里没有的条目（新集、关系图、按标题搜索）
 自动回退在线 API。
 
-## 7. 安全性
+## 6. 安全性
 
 - **只改一个字段**：`ProviderIds.Bangumi`。不碰文件、不碰其他元数据、不删条目。
 - **读-改-写 + 回读**：写前取完整条目，写完回读，并检查相邻字段是否被连带修改。
@@ -499,7 +480,7 @@ jbmid config --unset archive               # 删掉某一项
 - **默认不覆盖手写值**：`apply` 只写「新旧不同」的集；`protect` 让插件也不要覆盖。
 - **凭据只在本地**：API Key 和 Bangumi token 只用于发请求，不落盘、不上传。
 
-## 8. 常见问题
+## 7. 常见问题
 
 **Q1. `HTTP 401`**
 用 `Authorization: MediaBrowser Token="密钥"`，不是 `X-Emby-Token`。`jbmid` 已经这样发；自己 curl 时注意。
@@ -509,7 +490,7 @@ jbmid config --unset archive               # 删掉某一项
 `/Items?ParentId=…&IncludeItemTypes=Episode&Recursive=true`，不依赖那个端点。
 
 **Q3. 扫描很慢**
-每部剧要串行请求 Bangumi。接上离线档案（第 6 章）后全库 19 秒；也可以 `--limit` 先扫几部。
+每部剧要串行请求 Bangumi。接上离线档案（第 5 章）后全库 19 秒；也可以 `--limit` 先扫几部。
 
 **Q4. 同一部番在库里出现两次**
 `verify` 的 `duplicate_series` 会列出来（常见于同一份文件被两个库路径收录）。工具两份都改，不删条目。
@@ -519,7 +500,7 @@ jbmid config --unset archive               # 删掉某一项
 
 **Q6. TMDB 一季 = Bangumi 两个条目**
 `scan` 会自动尝试季级对齐（本地每季映射到链上连续一段）。对不上时用 `season` 手工指定，
-或用 `--seasons --clear-spans` 清掉季级 ID（第 5 章）。
+或用 `--seasons --clear-spans` 清掉季级 ID（第 4 章）。
 
 **Q7. 库是英文剧名还能匹配吗**
 能。标题搜索同时用 `Name` 和 `OriginalTitle`，集名对齐也做了括号、`SxxEyy`、`#nn` 等变体切分。
@@ -541,9 +522,9 @@ jbmid config --unset archive               # 删掉某一项
 不建议。cron 没有终端，向导会直接拒绝并返回 2；用子命令（如 `jbmid sync --library 动漫`），
 或 `jbmid wizard --yes`（全取默认、不会写库，只适合冒烟）。
 
-## 9. 实现
+## 8. 实现
 
-数据只来自两处：Jellyfin REST API 和 Bangumi API v0（或第 6 章的离线档案）。
+数据只来自两处：Jellyfin REST API 和 Bangumi API v0（或第 5 章的离线档案）。
 
 | 用途 | 端点 |
 | --- | --- |
@@ -566,7 +547,7 @@ jbmid config --unset archive               # 删掉某一项
 **它不解决什么**：Bangumi 上没有的条目；集名是纯文件名或没有信息的集；播出顺序与集号顺序不一致的剧
 （`verify` 只能报 `disorder`，得你确认）；电影。
 
-## 10. 开发
+## 9. 开发
 
 ```bash
 PYTHONPATH=src python -m unittest discover -s tests   # 197 个用例，全部离线（未 pip install -e . 时）

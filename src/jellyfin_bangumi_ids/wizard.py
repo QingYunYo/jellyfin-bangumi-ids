@@ -21,7 +21,7 @@ from . import __version__, settings
 from .anchor import run_seasons
 from .bangumi import Bangumi
 from .jellyfin import Jellyfin
-from .transport import force_ipv4
+from .transport import build_url, force_ipv4, get_json
 from .offline import (ArchiveIndex, OfflineBangumi, archive_hint, attempts, find_archive)
 from .scan import apply_report, rollback, run_scan
 from .scan import run_specials
@@ -115,7 +115,54 @@ _T: Dict[str, Tuple[str, str]] = {
     "not_saved": ("按 --no-save-key，不把 Key 写进文件", "--no-save-key: the key stays out of the file"),
     "cfg_show": ("显示当前值", "show current values"),
     "cfg_unset": ("清空某一项", "clear one value"),
-    "cfg_key": ("API Key（输入不回显）", "API Key (input is hidden)"),
+    "cfg_url": ("Jellyfin 地址（媒体服务器，默认 8096 端口，不是 Bangumi）",
+                "Jellyfin URL (the media server, port 8096, not Bangumi)"),
+    "cfg_key": ("Jellyfin API Key（控制台 → API 密钥；输入可见，可加 --hide-key）",
+                "Jellyfin API Key (dashboard → API Keys; typed visibly, add --hide-key)"),
+    "test": ("测试连接", "test the connection"),
+    "ask_archive": ("离线档案目录（Bangumi 插件下载的 archive）",
+                    "offline archive directory (the Bangumi plugin's archive)"),
+    "ask_archive_root": ("宿主机上 Jellyfin 的 data 目录（Docker 场景）",
+                         "host path of Jellyfin's data directory (Docker)"),
+    "type_actions": ("%s，回车默认%s", "%s, Enter = %s"),
+    "bad_encoding": ("这一行没读出来（编码问题），请重新输入。",
+                     "this line could not be decoded, please retype."),
+    "wide": ("含全角字符「%s」：请切到半角后重输（不做自动转换）。",
+             "full-width character %s: switch to half-width and retype (no auto-conversion)."),
+    "key_masked": ("已输入 %d 个字符：%s", "%d characters entered: %s"),
+    "key_short": ("Jellyfin 的 Key 一般是 32 位，请确认没粘错。",
+                  "Jellyfin keys are usually 32 characters; check the paste."),
+    "key_clean": ("已去掉误粘的空白、引号或 Bearer 前缀。",
+                  "trimmed stray spaces, quotes or a Bearer prefix."),
+    "why_scheme": ("地址缺少 http:// 前缀", "the URL is missing the http:// prefix"),
+    "why_dns": ("域名解析失败：地址写错或 DNS 不可用", "cannot resolve the host: wrong address or no DNS"),
+    "why_refused": ("连接被拒绝：端口没开或服务没启动", "connection refused: wrong port or no server"),
+    "why_timeout": ("连接超时：网络不通或地址不对", "timed out: unreachable or wrong address"),
+    "why_401": ("Key 被拒绝（401）", "the key was rejected (401)"),
+    "why_403": ("Key 权限不足（403）", "the key lacks permission (403)"),
+    "why_ssl": ("HTTPS 证书有问题，可先用 http://", "TLS problem: try http:// first"),
+    "why_other": ("原因：%s", "reason: %s"),
+    "first": ("第一个", "the first"),
+    "key_hint": ("Key 被拒绝：跑 `jbmid setup` 重输，或确认这个 Key 属于该服务器。",
+                 "the key was rejected: rerun `jbmid setup`, or check that it belongs to this server."),
+    "act_retry_url": ("Y=重新输入地址，n=放弃", "Y=retype the URL, n=give up"),
+    "act_retry_key": ("Y=重新输入 Key，n=放弃", "Y=retype the key, n=give up"),
+    "act_save": ("Y=保存到配置文件，n=只用这一次", "Y=save to the config file, n=this run only"),
+    "act_fix": ("1=改地址，2=改 Key，3=放弃", "1=fix the URL, 2=fix the key, 3=give up"),
+    "act_back": ("0=返回，回车默认0", "0=back, Enter = 0"),
+    "act_fix_url": ("改地址", "fix the URL"),
+    "act_fix_key": ("改 Key", "fix the key"),
+    "give_up_short": ("放弃", "give up"),
+    "no_save_any": ("不保存，这次运行先用着。", "not saved; used for this run only."),
+    "url_ok": ("地址可达：%s", "the URL answers: %s"),
+    "give_up": ("已取消首次设置；之后随时用 `jbmid setup` 重来。",
+                "setup cancelled; run `jbmid setup` whenever you want."),
+    "wrote": ("已保存", "saved"),
+    "not_wrote": ("没保存", "not saved"),
+    "cannot_write": ("写不进 %s（%s）；本次运行继续用这个值，退出后失效。需要长期保存就设 "
+                     "JBMID_CONFIG_DIR 到可写目录，或用 sudo。",
+                     "cannot write %s (%s); the value is used for this run only. Set "
+                     "JBMID_CONFIG_DIR to a writable directory, or use sudo."),
     "cfg_archive": ("离线档案目录", "offline archive directory"),
     "cfg_root": ("宿主机上 Jellyfin 的 data 挂载点", "host directory holding Jellyfin's data mount"),
     "trying": ("正在验证…", "checking…"),
@@ -152,26 +199,56 @@ def _eof() -> None:
     raise SystemExit(EOF_CODE)
 
 
-def _ask(prompt: str, default: str = "", hint: Optional[str] = None) -> str:
+def _hint(actions: str, default: str) -> str:
+    """Bracket text: the actions AND what Enter picks. Both are mandatory."""
+    return t("type_actions") % (actions, default)
+
+
+def _wide_char(text: str) -> str:
+    for ch in text:
+        if "\uff01" <= ch <= "\uff5e" or ch == "\u3000":
+            return ch
+    return ""
+
+
+def _read_line(prompt: str, ascii_only: bool = False, secret: bool = False) -> str:
+    """One line of input. Never converts characters: a full-width char is an error."""
+    while True:
+        try:
+            raw = getpass.getpass(prompt) if secret else input(prompt)
+        except UnicodeDecodeError:
+            print("  %s" % t("bad_encoding"))
+            continue
+        except EOFError:
+            if _NONINTERACTIVE[0]:
+                return ""
+            _eof()
+            return ""
+        except KeyboardInterrupt:
+            raise
+        if ascii_only:
+            wide = _wide_char(raw)
+            if wide:
+                print("  %s" % (t("wide") % wide))
+                continue
+        return raw.strip()
+
+
+def _ask(prompt: str, default: str = "", hint: Optional[str] = None,
+         ascii_only: bool = False, secret: bool = False) -> str:
     """A free-text answer; the bracket always says what Enter picks."""
     if hint:
         tail = "[%s]" % hint
     elif default:
-        tail = "[%s]" % (t("enter_pick") % (default, default))
+        tail = "[直接回车保留当前值]" if _LANG[0] == "zh" else "[Enter keeps the current value]"
     else:
         tail = "[%s]" % t("enter_empty")
-    try:
-        raw = input("%s%s: " % (prompt, tail))
-    except EOFError:
-        if _NONINTERACTIVE[0]:
-            return default
-        _eof()
-        return default
-    return raw.strip() or default
+    raw = _read_line("%s%s: " % (prompt, tail), ascii_only=ascii_only, secret=secret)
+    return raw or default
 
 
 def _h(word: str, default: str = "0") -> str:
-    return t("enter_pick") % (default, word)
+    return _hint("%s=%s" % (default, word), default)
 
 
 def _ask_back(prompt: str) -> Optional[str]:
@@ -182,16 +259,15 @@ def _ask_back(prompt: str) -> Optional[str]:
     return raw
 
 
-def _confirm(prompt: str, default: bool = False) -> bool:
+def _confirm(prompt: str, default: bool = False, actions: Optional[str] = None) -> bool:
     word = "Y" if default else "N"
-    tail = "[%s]" % (t("enter_pick") % (word, t("yes_word") if default else t("no_word")))
-    try:
-        raw = input("%s%s: " % (prompt, tail)).strip().lower()
-    except EOFError:
-        if _NONINTERACTIVE[0]:
-            return default
-        _eof()
-        return default
+    if actions:
+        tail = "[%s]" % _hint(actions, word)
+    else:
+        pair = "Y=%s，n=%s" % (t("yes_word"), t("no_word")) if _LANG[0] == "zh" \
+            else "Y=%s, n=%s" % (t("yes_word"), t("no_word"))
+        tail = "[%s]" % _hint(pair, word)
+    raw = _read_line("%s%s: " % (prompt, tail)).lower()
     if not raw:
         return default
     return raw in ("y", "yes", "是", "确认")
@@ -208,7 +284,7 @@ def _choose(prompt: str, options: List[Tuple[str, str]], back: Optional[str] = N
         if back:
             raw = _ask(prompt, "0", hint=_h(t("back_menu")))
         else:
-            raw = _ask(prompt, "1", hint=_h("first", "1"))
+            raw = _ask(prompt, "1", hint=_h(t("first"), "1"))
         if back and raw == "0":
             raise _Back()
         if raw.isdigit() and 1 <= int(raw) <= len(opts):
@@ -217,6 +293,76 @@ def _choose(prompt: str, options: List[Tuple[str, str]], back: Optional[str] = N
             if raw == key:
                 return key
         print("  ?")
+
+
+def normalize_url(raw: str) -> str:
+    """Trim, drop quotes, add http:// when the scheme is missing, drop a trailing /."""
+    text = (raw or "").strip().strip("\"'")
+    if not text:
+        return ""
+    if "://" not in text:
+        text = "http://" + text
+    return text.rstrip("/")
+
+
+def clean_key(raw: str) -> Tuple[str, bool]:
+    """Strip stray quotes/spaces and a pasted `Bearer ` prefix. Returns (key, changed)."""
+    text = (raw or "").strip().strip("\"'")
+    changed = text != (raw or "").strip()
+    for prefix in ("Bearer ", "bearer ", "BEARER "):
+        if text.startswith(prefix):
+            text = text[len(prefix):].strip()
+            changed = True
+            break
+    return text, changed
+
+
+def explain_conn(exc: Exception) -> str:
+    text = str(exc)
+    low = text.lower()
+    if "unknown url type" in low:
+        return t("why_scheme")
+    if "name or service not known" in low or "getaddrinfo" in low or "nodename" in low:
+        return t("why_dns")
+    if "connection refused" in low:
+        return t("why_refused")
+    if "timed out" in low or "timeout" in low:
+        return t("why_timeout")
+    if "certificate" in low or "ssl" in low and "handshake" in low:
+        return t("why_ssl")
+    if "401" in text:
+        return t("why_401")
+    if "403" in text:
+        return t("why_403")
+    return t("why_other") % text
+
+
+def classify_conn(exc: Exception) -> str:
+    """Which field should be re-asked: 'url', 'key' or 'other'."""
+    text = str(exc)
+    low = text.lower()
+    if "unknown url type" in low or "name or service not known" in low or "getaddrinfo" in low \
+            or "nodename" in low or "connection refused" in low or "timed out" in low:
+        return "url"
+    if "401" in text or "403" in text:
+        return "key"
+    return "other"
+
+
+def probe_url(url: str, timeout: float = 5.0) -> Dict[str, Any]:
+    """Ask Jellyfin ``/System/Info/Public`` (no key needed) whether the URL is right."""
+    return get_json(build_url(url, "/System/Info/Public"), timeout=timeout, retries=0)
+
+
+def save_settings(values: Dict[str, Any]) -> bool:
+    """Persist and say plainly whether it worked; never raise at the user."""
+    try:
+        settings.save(values)
+    except OSError as exc:
+        print("  %s" % (t("not_wrote") + ": " + (t("cannot_write") % (settings.config_path(), exc))))
+        return False
+    print("  %s: %s" % (t("wrote"), settings.config_path()))
+    return True
 
 
 class Session:
@@ -268,45 +414,107 @@ def _banner(sess: Session) -> None:
     print("-" * 62)
 
 
+def _ask_url(args, current: str) -> str:
+    hint = "直接回车保留当前值" if _LANG[0] == "zh" else "Enter keeps the current value"
+    raw = _ask(t("url_help"), current, hint=hint, ascii_only=True)
+    return normalize_url(raw) or current
+
+
+def _ask_key(args) -> str:
+    """Ask for the key; visible unless --hide-key, then print a masked summary."""
+    raw = _read_line("%s: " % t("cfg_key"), ascii_only=True,
+                     secret=bool(getattr(args, "hide_key", False)))
+    key, changed = clean_key(raw)
+    if key:
+        print("  " + t("key_masked") % (len(key), settings.mask(key)))
+        if len(key) != 32:
+            print("  " + t("key_short"))
+        if changed:
+            print("  " + t("key_clean"))
+    return key
+
+
 def _first_run(args, url: str, key: str) -> Tuple[str, str]:
-    """Ask for URL + key once, prove they work, and offer to remember them."""
+    """Ask for URL + key, prove they work, re-ask the field that actually failed."""
     print("")
     print("  %s" % t("first_run"))
-    url = _ask(t("url_help"), url or DEFAULT_URL, hint=t("url_hint")) or DEFAULT_URL
-    while True:
+    url = _ask_url(args, url or DEFAULT_URL)
+    for attempt in range(3):
         try:
-            key = getpass.getpass("%s: " % t("cfg_key")).strip()
-        except (EOFError, KeyboardInterrupt):
-            _eof()
-            return url, key
+            probe_url(url, timeout=min(float(getattr(args, "timeout", 20.0)), 8.0))
+        except KeyboardInterrupt:
+            raise
+        except Exception as exc:  # noqa: BLE001 - check the address before the key
+            print("  %s: %s" % (t("test_fail"), explain_conn(exc)))
+            if attempt == 2 or not _confirm(t("retry"), default=True, actions=t("act_retry_url")):
+                print("  %s" % t("give_up"))
+                return "", ""
+            url = _ask_url(args, url)
+            continue
+        print("  " + t("url_ok") % url)
+        break
+    else:
+        print("  %s" % t("give_up"))
+        return "", ""
+    for attempt in range(3):
+        key = _ask_key(args)
         if not key:
             print("  %s" % t("nokey"))
             continue
         print("  %s" % t("trying"))
         try:
             info = Jellyfin(url, key, timeout=getattr(args, "timeout", 20.0)).ping()
+        except KeyboardInterrupt:
+            raise
         except Exception as exc:  # noqa: BLE001 - explain, never traceback
-            print("  %s: %s" % (t("test_fail"), exc))
-            if not _confirm(t("retry"), default=True):
-                return url, ""
+            print("  %s: %s" % (t("test_fail"), explain_conn(exc)))
+            kind = classify_conn(exc)
+            if kind == "url":
+                if attempt == 2 or not _confirm(t("retry"), default=True, actions=t("act_retry_url")):
+                    print("  %s" % t("give_up"))
+                    return "", ""
+                url = _ask_url(args, url)
+                continue
+            if kind == "key":
+                if attempt == 2 or not _confirm(t("retry"), default=True, actions=t("act_retry_key")):
+                    print("  %s" % t("give_up"))
+                    return "", ""
+                continue
+            try:
+                choice = _choose(t("conn"), [("url", t("act_fix_url")),
+                                             ("key", t("act_fix_key")),
+                                             ("giveup", t("give_up_short"))])
+            except _Back:
+                return "", ""
+            if choice == "giveup":
+                print("  %s" % t("give_up"))
+                return "", ""
+            if choice == "url":
+                url = _ask_url(args, url)
             continue
         print("  " + t("test_ok") % (info["version"], info["users"], info["libraries"]))
         break
-    if _confirm(t("save_config"), default=True):
-        values = {"url": url}
+    else:
+        print("  %s" % t("give_up"))
+        return "", ""
+    if _confirm(t("save_config"), default=True, actions=t("act_save")):
+        values: Dict[str, Any] = {"url": url}
         if getattr(args, "no_save_key", False):
             print("  %s (api_key)" % t("not_saved"))
         else:
             values["api_key"] = key
-        settings.save(values)
-        print("  %s: %s" % (t("saved_word"), settings.config_path()))
+        save_settings(values)
+    else:
+        print("  %s" % t("no_save_any"))
     return url, key
 
 
-def _open(args, force_setup: bool = False) -> Optional[Session]:
+def _open(args, force_setup: bool = False) -> Optional["Session"]:
     stored = settings.load()
     url = getattr(args, "url", None) or os.environ.get("JF_URL") or stored.get("url") or DEFAULT_URL
+    url = normalize_url(url) or DEFAULT_URL
     key = getattr(args, "api_key", None) or os.environ.get("JF_API_KEY") or stored.get("api_key") or ""
+    key = clean_key(key)[0]
     interactive = not _NONINTERACTIVE[0] and sys.stdin.isatty()
     if force_setup or (not key and interactive):
         if not interactive:
@@ -320,21 +528,24 @@ def _open(args, force_setup: bool = False) -> Optional[Session]:
     try:
         info = jf.get("/System/Info") or {}
     except Exception as exc:  # noqa: BLE001 - a wizard must explain, not traceback
-        print("%s: %s" % (t("conn"), exc))
-        if interactive:
-            fixed = _ask(t("url_help"), url, hint=t("url_hint"))
-            if fixed and fixed != url:
-                url = fixed
-                jf = Jellyfin(url, key, timeout=getattr(args, "timeout", 20.0))
+        print("%s: %s" % (t("conn"), explain_conn(exc)))
+        kind = classify_conn(exc)
+        if interactive and kind == "url":
+            if _confirm(t("retry"), default=True, actions=t("act_retry_url")):
+                fixed = _ask_url(args, url)
+                jf = Jellyfin(fixed, key, timeout=getattr(args, "timeout", 20.0))
                 try:
                     info = jf.get("/System/Info") or {}
                 except Exception as exc2:  # noqa: BLE001
-                    print("%s: %s" % (t("conn"), exc2))
+                    print("%s: %s" % (t("conn"), explain_conn(exc2)))
                     print(t("conn_hint"))
                     return None
-                if _confirm(t("save_config"), default=True):
-                    settings.save({"url": url})
+                url = fixed
+                if _confirm(t("save_config"), default=True, actions=t("act_save")):
+                    save_settings({"url": url})
                 return _session(args, jf, info, url)
+        elif interactive and kind == "key":
+            print(t("key_hint"))
         print(t("conn_hint"))
         return None
     return _session(args, jf, info, url)
@@ -701,45 +912,50 @@ def _flow_config(sess: Session) -> None:
                 info = sess.jf.ping()
                 print("  " + t("test_ok") % (info["version"], info["users"], info["libraries"]))
             except Exception as exc:  # noqa: BLE001
-                print("  %s: %s" % (t("test_fail"), exc))
+                print("  %s: %s" % (t("test_fail"), explain_conn(exc)))
             continue
         if mode == "show":
             continue
         if mode == "unset":
             try:
-                key = _choose("key", [(k, k) for k in settings.KEYS], back=t("back_menu"))
+                key = _choose(t("cfg_unset"), [(k, k) for k in settings.KEYS], back=t("back_menu"))
             except _Back:
                 continue
-            settings.unset(key)
+            try:
+                settings.unset(key)
+            except OSError as exc:
+                print("  %s: %s" % (t("not_wrote"), exc))
+                continue
             print("  unset: %s" % key)
             continue
         if mode == "api_key":
-            try:
-                value = getpass.getpass("%s: " % t("cfg_key")).strip()
-            except (EOFError, KeyboardInterrupt):
-                _eof()
-                return
+            value = _ask_key(sess_args(sess))
             if not value:
                 continue
+            changed_url = sess.url
             try:
-                info = Jellyfin(sess.url, value, timeout=20.0).ping()
+                info = Jellyfin(changed_url, value, timeout=getattr(sess.jf, "timeout", 20.0)).ping()
                 print("  " + t("test_ok") % (info["version"], info["users"], info["libraries"]))
             except Exception as exc:  # noqa: BLE001
-                print("  %s: %s" % (t("test_fail"), exc))
-                if not _confirm(t("save_config"), default=False):
+                print("  %s: %s" % (t("test_fail"), explain_conn(exc)))
+                if not _confirm(t("save_config"), default=False, actions=t("act_save")):
                     continue
-            settings.save({"api_key": value})
-            sess.jf = Jellyfin(sess.url, value, timeout=getattr(sess.jf, "timeout", 20.0))
-            print("  %s: %s" % (t("saved_word"), settings.config_path()))
+            if save_settings({"api_key": value}):
+                sess.jf = Jellyfin(changed_url, value, timeout=getattr(sess.jf, "timeout", 20.0))
             continue
+        prompts = {"url": t("url_help"), "archive": t("ask_archive"),
+                   "archive_root": t("ask_archive_root")}
         default = data.get(mode, "") if mode != "url" else (data.get("url") or sess.url)
-        value = _ask(mode, default, hint=t("url_hint"))
-        if not value or value == "0":
+        hint = "直接回车保留当前值" if _LANG[0] == "zh" else "Enter keeps the current value"
+        raw = _ask(prompts.get(mode, mode), default, hint=hint, ascii_only=(mode == "url"))
+        if not raw:
             continue
+        value = normalize_url(raw) if mode == "url" else raw
         if mode in ("archive", "archive_root"):
             value = os.path.abspath(os.path.expanduser(value))
-        settings.save({mode: value})
-        print("  %s: %s = %s" % (t("saved_word"), mode, value))
+        if not save_settings({mode: value}):
+            continue
+        print("  %s: %s = %s" % (t("wrote"), mode, value))
         if mode == "url":
             sess.url = value
             sess.jf = Jellyfin(value, getattr(sess.jf, "api_key", ""), timeout=20.0)
@@ -750,6 +966,16 @@ def _flow_config(sess: Session) -> None:
         if mode == "archive":
             sess.archive = value
             sess.bgm = OfflineBangumi(ArchiveIndex(value, verbose=False), Bangumi(), label=value)
+
+
+class _Args:
+    hide_key = False
+    timeout = 20.0
+    no_save_key = False
+
+
+def sess_args(sess: Session) -> _Args:
+    return _Args()
 
 
 def setup(args) -> int:
@@ -875,5 +1101,7 @@ def run(args) -> int:
             return 130
         except SystemExit:
             raise
-        except Exception as exc:  # noqa: BLE001 - keep the menu alive
+        except OSError as exc:  # noqa: BLE001 - a file problem, not a crash
             print("  ! %s" % exc)
+        except Exception as exc:  # noqa: BLE001 - keep the menu alive
+            print("  ! %s: %s" % (t("test_fail"), explain_conn(exc)))

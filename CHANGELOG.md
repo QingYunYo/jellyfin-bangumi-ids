@@ -4,6 +4,11 @@
 
 ## 0.1.5（未发布）
 
+- **首次设置不再让人白输**：先探测 `/System/Info/Public` 验证地址（无需 Key），再问 Key；
+  地址不写 `http://` 会自动补全，全角字符不会静默转换、而是提示重输；连接失败按原因分诊
+  （地址类只重问地址、401/403 只重问 Key、其他给选择）；Key 默认**可见输入**、回车后显示打码
+  摘要与长度提示，`--hide-key` 可隐藏；`Y/n` 括号里同时写动作与回车默认；配置目录不可写时明确
+  打「没保存」并提示 `JBMID_CONFIG_DIR`。文档第 1 章改为「安装与快速开始」。
 - **一次设置，之后免参数**：`jbmid setup`（或首次直接运行 `jbmid`）依次询问 Jellyfin 地址、
   API Key、离线档案，当场验证并写入 `~/.config/jellyfin-bangumi-ids/config.json`（0600）；
   `--api-key` / `JF_API_KEY` / 配置文件 / 默认值 四级回落，`--no-save-key` 可让 Key 不落盘。

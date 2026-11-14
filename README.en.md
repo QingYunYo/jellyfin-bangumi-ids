@@ -13,18 +13,112 @@ video files, never other metadata.
 
 ## Contents
 
-- [1. Two kinds of ID](#1-two-kinds-of-id)
-- [2. Install and API key](#2-install-and-api-key)
-- [3. Quick start](#3-quick-start)
-- [4. Modes and usage](#4-modes-and-usage)
-- [5. Season IDs: why they have to be fixed too](#5-season-ids-why-they-have-to-be-fixed-too)
-- [6. Data sources and configuration: archive, Docker, config](#6-data-sources-and-configuration-archive-docker-config)
-- [7. Safety](#7-safety)
-- [8. FAQ](#8-faq)
-- [9. How it works](#9-how-it-works)
-- [10. Development](#10-development)
+- [1. Install and first run](#1-install-and-first-run)
+- [2. Two kinds of ID](#2-two-kinds-of-id)
+- [3. Modes and usage](#3-modes-and-usage)
+- [4. Season IDs: why they have to be fixed too](#4-season-ids-why-they-have-to-be-fixed-too)
+- [5. Data sources and configuration: archive, Docker, config](#5-data-sources-and-configuration-archive-docker-config)
+- [6. Safety](#6-safety)
+- [7. FAQ](#7-faq)
+- [8. How it works](#8-how-it-works)
+- [9. Development](#9-development)
+- [License](#license)
 
-## 1. Two kinds of ID
+## 1. Install and first run
+
+Standard library only, Python ≥ 3.8:
+
+```bash
+pip install git+https://github.com/QingYunYo/jellyfin-bangumi-ids.git
+```
+
+If installing fails, that is fine: Debian / NAS Python ships PEP 668 (`externally-managed-environment`).
+Run the bundled launcher from the checkout instead — it touches no system directory:
+
+```bash
+git clone https://github.com/QingYunYo/jellyfin-bangumi-ids.git
+cd jellyfin-bangumi-ids
+./jbmid doctor        # same as the installed jbmid doctor
+```
+
+Prefer a real install without touching system Python? `python3 -m venv .venv && . .venv/bin/activate && pip install -e .`
+
+### 1.1 First run: three answers
+
+```bash
+./jbmid               # or just jbmid once installed
+```
+
+With no config yet it goes straight into setup: it first checks the address against
+`/System/Info/Public` (no key needed), then asks for the key, then for the archive — so a wrong
+address never makes you retype the key. The three questions:
+
+1. **Jellyfin URL** — the media server (port 8096 by default), **not Bangumi**; an IP is fine,
+   `192.168.1.10:8096` is completed to `http://192.168.1.10:8096` for you.
+2. **Jellyfin API key** — dashboard → API Keys → create. It is typed **visibly**, so a bad paste is
+   obvious; after Enter you see only a masked summary (`e76c********84d0`) plus a length hint.
+3. **Offline archive** (optional) — auto-detected; skip it and add it later.
+
+The answers are verified against the server and written to
+`~/.config/jellyfin-bangumi-ids/config.json` (mode 0600), so later commands need **no environment
+variables at all**. Add `--no-save-key` to keep the key off disk, `--hide-key` to stop masking while typing.
+
+> If the directory is not writable it says "not saved" and tells you about `JBMID_CONFIG_DIR`; it never
+> pretends the write worked. Later: `jbmid config` (an editor in a terminal), `jbmid config --test`.
+
+When a connection fails it asks for the field that actually failed: an address problem re-asks the URL,
+a 401/403 re-asks the key, anything else gives you a choice.
+
+### 1.2 Then: the menu, or the subcommands
+
+The menu has eight entries; on a first run go "1 check → 2 episode ids → 3 season ids", and "6 rollback"
+if something looks wrong:
+
+```text
+  1  check (verify + report)
+  2  fix episode ids (scan -> apply)
+  3  fix season ids (anchor --seasons)
+  4  fix specials (special -> apply)
+  5  one-shot (sync)
+  6  rollback from a backup
+  7  one series
+  8  config
+  0  exit
+```
+
+Every write flow previews first and asks once more: **the bracket names both the keys and what Enter
+picks**, and `0` always means back / cancel. Afterwards it prints the backup file, the rollback command
+and the equivalent subcommand. For cron, skip the menu and use 1.3.
+
+### 1.3 Subcommands (scripts, exact control)
+
+```bash
+jbmid scan --library Anime --limit 3 --out report.json   # report only; --library is case-insensitive
+jbmid apply report.json --dry-run                        # dry run first
+jbmid apply report.json --backup jbmid-backup.json       # write, old values saved
+jbmid rollback jbmid-backup.json                         # one command to undo
+```
+
+```text
+$ jbmid scan --library 动漫 --limit 3
+scanning 3 series from library 动漫
+[1/3] OK   2.5次元的诱惑           to write 0
+[2/3] OK   86-不存在的战区-        to write 0
+[3/3] OK   拔作岛                  to write 0
+series ok      : 3
+series review  : 0
+episodes       : 0 to write
+```
+
+Three numbers: `series ok` can be aligned, `series review` is uncertain (**not written**, read `reason`),
+`episodes to write` is the count that would change. Each series in the report carries `anchor` / `chain` /
+`notes`, and `review` rows explain themselves (e.g. `size mismatch 25 local vs 51 pool`).
+
+If more than a couple of series land in `review`, pick a mode in chapter 3; if the IDs are written but the
+plugin still complains, read chapter 4 (season ids).
+
+
+## 2. Two kinds of ID
 
 Every **episode** and every **season** in Jellyfin can carry a Bangumi ID, and they do different jobs:
 
@@ -65,118 +159,14 @@ off), an SP counted as a regular episode (shifting everything), manual fixes ove
 | half a season without IDs | `apply` fills empty slots only |
 | episode IDs pointing at another show | anchor validation + season vote; `anchor --series` to re-pin |
 | broadcast order ≠ episode order | `verify` reports `disorder`; you decide |
-| one local season, two entries | `anchor --seasons --clear-spans` clears the season ID (chapter 5) |
+| one local season, two entries | `anchor --seasons --clear-spans` clears the season ID (chapter 4) |
 | `SP` in a title treated as a special | matched as `SP\d+` now (`（Sp...）` no longer misread) |
 
-## 2. Install and API key
-
-Standard library only, Python ≥ 3.8:
-
-```bash
-pip install git+https://github.com/QingYunYo/jellyfin-bangumi-ids.git
-# local development
-git clone https://github.com/QingYunYo/jellyfin-bangumi-ids.git
-cd jellyfin-bangumi-ids && pip install -e .
-```
-
-This gives you `jbmid`. **If installing fails, that is fine**: Debian / NAS Python ships PEP 668
-(`externally-managed-environment`), and in that case run the bundled launcher from the checkout — it
-touches no system directory:
-
-```bash
-git clone https://github.com/QingYunYo/jellyfin-bangumi-ids.git
-cd jellyfin-bangumi-ids
-./jbmid doctor        # same as the installed jbmid doctor
-./jbmid wizard
-```
-
-Prefer a real install without touching system Python? Use a venv:
-
-```bash
-python3 -m venv .venv && . .venv/bin/activate && pip install -e .
-```
-
-Without installing you can also use `PYTHONPATH=src python3 -m jellyfin_bangumi_ids <command>`.
-
-Create an API key in Jellyfin
-(Dashboard → API Keys), then:
-
-```bash
-export JF_URL=http://127.0.0.1:8096
-export JF_API_KEY=your-key
-jbmid doctor          # connectivity, data source, plugin state
-```
-
-`doctor` reports whether it uses the live API or the offline archive, and whether the plugin has
-`TrustExistedBangumiId` on.
-
-### 2.1 Store the connection once
-
-Run `jbmid setup` the first time (or just type `jbmid` in a terminal — it walks you through setup).
-It asks three things and verifies them right away:
-
-1. **Jellyfin URL** — `http://127.0.0.1:8096`. This is the **Jellyfin media server** (port 8096 by
-   default), not Bangumi; use the IP of the machine running Jellyfin, e.g. `http://192.168.1.10:8096`.
-2. **API key** — Jellyfin dashboard → API Keys → create one.
-3. **Offline archive** (optional) — auto-detected; skip it and add it later if you want.
-
-The answers are checked against the server and written to
-`~/.config/jellyfin-bangumi-ids/config.json` (mode 0600), so `jbmid scan`, `jbmid wizard` and friends
-work afterwards **without exporting anything**. Pass `--no-save-key` to keep the key off disk, or keep
-using the environment variables.
-
-Every command still accepts `--url` / `--api-key` to override, plus `--ipv4` (IPv4-only containers)
-and `--timeout`. To change stored values later: `jbmid config` (an editor in a terminal) and
-`jbmid config --test` to check the connection — details in chapter 6.
-
-## 3. Quick start
-
-Two ways in. Pick the one that matches how you like to work.
-
-### 3.1 Don't want to memorise flags: the wizard
-
-```bash
-./jbmid wizard        # `jbmid` if installed, `./jbmid` inside a checkout
-```
-
-The menu has eight entries: check, episode ids, season ids, specials, one-shot, rollback, one series,
-config. On the first run walk 1 → 2 → 3, and use 6 if something looks off. Every write flow previews first
-and asks once more: **the bracketed value is what Enter gives you, and `0` always means back / cancel**.
-When a flow finishes it prints the backup file, the rollback command and the equivalent non-interactive
-command, so you can paste the last one into a script. For cron, skip the wizard and use 3.2.
-
-### 3.2 Want exact control: the subcommands
-
-```bash
-jbmid scan --library Anime --limit 3 --out report.json  # report only; --library ignores case, omit for all
-jbmid apply report.json --dry-run                       # dry run first
-jbmid apply report.json --backup jbmid-backup.json      # write for real, old values are backed up
-jbmid rollback jbmid-backup.json                        # undo everything if needed
-```
-
-```text
-$ jbmid scan --library Anime --limit 3
-scanning 3 series from library Anime
-[1/3] OK   2.5次元的诱惑           to write 0
-[2/3] OK   86-不存在的战区-        to write 0
-[3/3] OK   拔作岛                  to write 0
-series ok      : 3
-series review  : 0
-episodes       : 0 to write
-```
-
-Three numbers: `series ok` aligned, `series review` uncertain (**not written**, see `reason`),
-`episodes to write` how many episodes change. Each series in the report carries `anchor` / `chain` /
-`notes`; reviews explain themselves (e.g. `size mismatch 25 local vs 51 pool`).
-
-If more than a couple of series land in `review`, pick a mode in chapter 4; if the IDs are written but the
-plugin still complains, read chapter 5 (season ids).
-
-## 4. Modes and usage
+## 3. Modes and usage
 
 The only hard rule for picking a mode is **whether it writes** — when in doubt, add `--dry-run`. The table
-below is grouped by how much it touches; individual modes are 4.1–4.10, and
-**[4.11](#411-putting-it-together-the-order-that-actually-works) is how to combine them on a real repair**.
+below is grouped by how much it touches; individual modes are 3.1–3.10, and
+**[3.11](#311-putting-it-together-the-order-that-actually-works) is how to combine them on a real repair**.
 
 | Group | Mode | What it does | Writes? |
 | --- | --- | --- | --- |
@@ -194,7 +184,7 @@ below is grouped by how much it touches; individual modes are 4.1–4.10, and
 | config | `protect` | stop the plugin from overwriting hand-written IDs | plugin setting |
 | config | `config` | remember the archive path / server URL | writes config |
 
-### 4.1 `wizard`: skip the flags
+### 3.1 `wizard`: skip the flags
 
 `jbmid wizard` turns the common flows into a menu. Every write is previewed first and then asked
 again, and the default answer is "no":
@@ -208,7 +198,7 @@ jbmid wizard --yes      # non-interactive: take every default, never write (smok
 
 Eight entries: check, fix episode ids, fix season ids, fix specials, one-shot, rollback, one series,
 config. On start it resolves the server URL (`--url` -> `JF_URL` -> `config` -> default) and the
-offline archive (chapter 6); when no archive is found it prints the paths it tried and why, then offers
+offline archive (chapter 5); when no archive is found it prints the paths it tried and why, then offers
 to type a path, give the host mount point, or go online.
 
 The specials flow also asks whether to clear specials that borrow a main-episode id (default `N`,
@@ -226,7 +216,7 @@ Exit codes: `0` finished, `1` cannot reach Jellyfin or the API key was rejected,
 no `--yes`, `3` input ended (a script that closed stdin), `130` Ctrl-C. A failure prints one
 actionable line instead of a traceback; add `-v` to see every HTTP request, status and byte count.
 
-### 4.2 `scan`: look before you leap
+### 3.2 `scan`: look before you leap
 
 The usual entry point: for every show it finds an anchor, builds a pool, aligns by episode title and
 decides — **without writing anything**.
@@ -251,7 +241,7 @@ subject first, while the other seasons still walk the chain (`notes` then say
 chain failed**; by default the chain still decides, otherwise a season that legitimately spans two
 subjects would be split into "this season owns one subject".
 
-### 4.3 `apply` / `rollback`: land the report, or undo it
+### 3.3 `apply` / `rollback`: land the report, or undo it
 
 ```bash
 jbmid apply report.json --dry-run                 # how many episodes would change
@@ -270,7 +260,7 @@ been mapped to the previous season's episodes: the refresh changed `OriginalTitl
 season's title to the correct one and left `Name` / `Overview` / `PremiereDate` untouched; locked
 fields are never overwritten. `season` and `auto` accept `--refresh` too.
 
-### 4.4 `season`: when Bangumi's seasons don't line up
+### 3.4 `season`: when Bangumi's seasons don't line up
 
 Use it when the number of local seasons differs from the chain, or the order is off. The JSON says
 "season N = these subjects":
@@ -285,7 +275,7 @@ jbmid season --map map.json --dry-run
 
 `sp: true` treats that season as specials (aligns against Bangumi `type=1` episodes).
 
-### 4.5 `auto`: the one-shot
+### 3.5 `auto`: the one-shot
 
 No anchor given: it searches subjects by title, aligns by episode name and writes:
 
@@ -297,7 +287,7 @@ jbmid auto --library Anime
 Easiest to run, and the mode most worth reading: every show prints its `method`
 (`name` / `season-map` / `stored` / `order`).
 
-### 4.6 `special`: specials, OVA, recaps
+### 3.6 `special`: specials, OVA, recaps
 
 Season 0 and episodes containing `番外|OVA|OAD|SP|总集篇|特典` are aligned against Bangumi `type=1`
 episodes:
@@ -308,7 +298,7 @@ jbmid apply specials.json
 jbmid special --library Anime --clear-borrowed   # clear specials that borrowed a regular episode ID
 ```
 
-### 4.7 `anchor`: the anchor itself is wrong
+### 3.7 `anchor`: the anchor itself is wrong
 
 Repins a single show, and repairs season-level IDs:
 
@@ -321,7 +311,7 @@ jbmid anchor --library Anime --seasons --all --clear-spans   # clear seasons tha
 Lookup order: **episode-parent → season-ID vote → the series' own ID → title search**, all behind a title
 check; `--force` accepts dubious values, `--clear` removes them.
 
-### 4.8 `verify`: the read-only audit
+### 3.8 `verify`: the read-only audit
 
 ```bash
 jbmid verify --library Anime                          # one summary line + category detail
@@ -329,10 +319,10 @@ jbmid verify --library Anime --by-series              # grouped per show: which 
 jbmid verify --library Anime --fail-on season-ids,dup # exit 1 on a hit (cron / CI)
 ```
 
-Field meanings are in [chapter 5](#5-season-ids-why-they-have-to-be-fixed-too); `--fail-on` accepts
+Field meanings are in [chapter 4](#4-season-ids-why-they-have-to-be-fixed-too); `--fail-on` accepts
 `unknown dup low-sim disorder foreign anchors season-ids season-spans none`.
 
-### 4.9 `protect` / `doctor`
+### 3.9 `protect` / `doctor`
 
 ```bash
 jbmid protect     # sets TrustExistedBangumiId = True so refreshes stop overwriting
@@ -340,13 +330,13 @@ jbmid doctor      # connectivity / data source / plugin state
 ```
 
 `jbmid config` (remember the paths) is at the end of
-[chapter 6](#6-data-sources-and-configuration-archive-docker-config).
+[chapter 5](#5-data-sources-and-configuration-archive-docker-config).
 
 Every sample output in both READMEs comes from [`examples/`](examples/README.md) (real reports and backups, trimmed, with field notes).
 
-### 4.10 `sync`: the whole pipeline in one run
+### 3.10 `sync`: the whole pipeline in one run
 
-It chains the five steps of the 4.11 table: `scan` → `apply` → `anchor --seasons` → `special` → `verify`.
+It chains the five steps of the 3.11 table: `scan` → `apply` → `anchor --seasons` → `special` → `verify`.
 
 ```bash
 jbmid sync --library Anime --dry-run              # prints every step, writes nothing
@@ -359,7 +349,7 @@ half-applied state forward. `--stop-on-review` stops right after `scan` if anyth
 `--fail-on season-ids,dup` turns the final audit into an exit code for cron / CI. `--backup-dir` and
 `--out-dir` choose where backups and intermediate reports go.
 
-### 4.11 Putting it together: the order that actually works
+### 3.11 Putting it together: the order that actually works
 
 In practice these modes are **used together**, not one and done. On a first pass, walk this order:
 
@@ -389,7 +379,7 @@ reviews, pin the mapping with `season --map`; if a *single* local season spans t
 Why the order cannot be reversed: **episodes → seasons** (the vote reads episode IDs), **episodes → specials**
 (borrowed IDs make the pool dirty), **fix → lock** (`protect` too early also blocks your own fixes).
 
-## 5. Season IDs: why they have to be fixed too
+## 4. Season IDs: why they have to be fixed too
 
 When reporting "watching", the Bangumi plugin takes the subject from **the episode's parent (season)**, not
 from the episode's own ID. Therefore:
@@ -430,7 +420,7 @@ $ jbmid anchor --library Anime --seasons --all --clear-spans --dry-run
 **Why clear instead of picking one**: 12 episodes belong to part A, 13 to part B, and a season has room for
 one ID. Write A and B's 13 episodes report to A; write B and A's 12 report to B. With the ID cleared,
 `PlaybackScrobbler` falls back to "look up the subject from this episode's own ID", which is right for both —
-that is exactly the log comparison in chapter 1.
+that is exactly the log comparison in chapter 2.
 
 **Safety boundary**: `--force` only widens low confidence (fewer than 2 episodes, under 60% of the vote).
 It **never** writes a majority vote for a spanning season (those are skipped), otherwise it would immediately
@@ -440,7 +430,7 @@ Writes are read-modify-write: GET the full item → change only `ProviderIds.Ban
 check neighbouring fields were not dragged along; every change is also recorded in a backup that `rollback`
 can restore. Season rows carry `"kind": "season"`.
 
-## 6. Data sources and configuration: archive, Docker, config
+## 5. Data sources and configuration: archive, Docker, config
 
 After installing the Bangumi plugin and running its "update offline database" task,
 `{Jellyfin DataPath}/bangumi/archive/` holds a few `.jsonlines` files. This tool reads them directly,
@@ -478,7 +468,7 @@ records the attempt and keeps looking instead of silently running online for 40 
 prints every path it tried and why it failed (`missing` / `unreadable`) — fix it with one
 `jbmid config --archive DIR`.
 
-### 6.1 Remember the paths: `jbmid config`
+### 5.1 Remember the paths: `jbmid config`
 
 ```bash
 jbmid config --url http://127.0.0.1:8096   # Jellyfin URL (port 8096), not Bangumi
@@ -514,7 +504,7 @@ The SQLite index lives in `~/.cache/jellyfin-bangumi-ids/` (`JBMID_CACHE` overri
 the source files stay read-only. The archive is maintained by the plugin's "update offline database" task (roughly every two weeks); when it is stale the live API wins.
 Anything the archive cannot answer (new episodes, relations, title search) falls back to the online API.
 
-## 7. Safety
+## 6. Safety
 
 - **One field only**: `ProviderIds.Bangumi`. No files, no other metadata, no deleted items.
 - **Read-modify-write with read-back**: fetch the full item, write, read again, verify neighbours.
@@ -523,7 +513,7 @@ Anything the archive cannot answer (new episodes, relations, title search) falls
 - **Never overwrite blindly**: `apply` writes only episodes whose old value differs; `protect` stops the plugin too.
 - **Credentials stay local**: the API key and Bangumi token are used for requests only — never stored, never uploaded.
 
-## 8. FAQ
+## 7. FAQ
 
 **Q1. `HTTP 401`**
 Send `Authorization: MediaBrowser Token="key"`, not `X-Emby-Token`. `jbmid` already does; mind it if you curl yourself.
@@ -533,7 +523,7 @@ Older Jellyfin builds are inconsistent about `/Shows/{id}/Episodes`. This tool u
 `/Items?ParentId=…&IncludeItemTypes=Episode&Recursive=true` instead and does not depend on that endpoint.
 
 **Q3. Scans are slow**
-Every series means serial Bangumi requests. With the offline archive (chapter 6) a full scan takes 19 seconds;
+Every series means serial Bangumi requests. With the offline archive (chapter 5) a full scan takes 19 seconds;
 `--limit` also helps for a first look.
 
 **Q4. The same show appears twice**
@@ -546,7 +536,7 @@ counted as regular episodes. Use `special` to fix them too.
 
 **Q6. One TMDB season = two Bangumi entries**
 `scan` tries season alignment first (each local season onto a contiguous run of chain subjects). If that
-fails, use `season` with an explicit map, or `--seasons --clear-spans` to clear the season ID (chapter 5).
+fails, use `season` with an explicit map, or `--seasons --clear-spans` to clear the season ID (chapter 4).
 
 **Q7. My library uses English titles — can it still match?**
 Yes. Title search uses both `Name` and `OriginalTitle`, and episode alignment splits variants such as
@@ -570,10 +560,10 @@ series are skipped by season alignment.
 No. Without a terminal it refuses and exits 2 — use the subcommands (e.g. `jbmid sync --library Anime`),
 or `jbmid wizard --yes` (all defaults, never writes, smoke tests only).
 
-## 9. How it works
+## 8. How it works
 
 Data comes from exactly two places: the Jellyfin REST API and Bangumi API v0 (or the offline archive in
-chapter 6).
+chapter 5).
 
 | Purpose | Endpoint |
 | --- | --- |
@@ -597,7 +587,7 @@ hard-coded — libraries, subjects and season structure are all queried at runti
 no information; shows where broadcast order differs from episode order (`verify` can only report `disorder`);
 movies.
 
-## 10. Development
+## 9. Development
 
 ```bash
 PYTHONPATH=src python -m unittest discover -s tests   # 197 cases, fully offline (if not pip install -e .)

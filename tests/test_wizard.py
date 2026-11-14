@@ -436,7 +436,9 @@ class FirstRunTest(unittest.TestCase):
 
     def _run(self, save_key=True):
         args = mock.Mock(timeout=5.0, no_save_key=not save_key, url=None, api_key=None)
+        args.hide_key = True
         with mock.patch.object(wizard, "_ask", return_value="http://jf:8096"), \
+                mock.patch.object(wizard, "probe_url", return_value={"Version": "12.4.0"}), \
                 mock.patch.object(wizard.getpass, "getpass", return_value="k-123"), \
                 mock.patch.object(wizard.Jellyfin, "ping",
                                   return_value={"version": "12.4.0", "users": 2,
@@ -455,3 +457,49 @@ class FirstRunTest(unittest.TestCase):
         self._run(save_key=False)
         self.assertEqual(self.settings.load()["url"], "http://jf:8096")
         self.assertNotIn("api_key", self.settings.load())
+
+
+class InputRulesTest(unittest.TestCase):
+    """The rules the first-run experience depends on."""
+
+    def test_url_gets_http_when_the_scheme_is_missing(self):
+        self.assertEqual(wizard.normalize_url("192.168.1.10:8096"),
+                         "http://192.168.1.10:8096")
+        self.assertEqual(wizard.normalize_url(" http://jf:8096/ "), "http://jf:8096")
+        self.assertEqual(wizard.normalize_url("https://jf"), "https://jf")
+        self.assertEqual(wizard.normalize_url(""), "")
+
+    def test_key_is_cleaned_but_not_rewritten(self):
+        self.assertEqual(wizard.clean_key("  'abc'  "), ("abc", True))
+        self.assertEqual(wizard.clean_key("Bearer abc"), ("abc", True))
+        self.assertEqual(wizard.clean_key("abc"), ("abc", False))
+
+    def test_full_width_characters_are_rejected_not_converted(self):
+        with mock.patch("builtins.input", side_effect=["１９２", "192"]), \
+                redirect_stdout(io.StringIO()) as out:
+            self.assertEqual(wizard._read_line("q: ", ascii_only=True), "192")
+        self.assertIn("全角", out.getvalue())
+
+    def test_connection_errors_point_at_the_right_field(self):
+        self.assertEqual(wizard.classify_conn(Exception("unknown url type: 192.168.1.2")), "url")
+        self.assertEqual(wizard.classify_conn(Exception("HTTP 401")), "key")
+        self.assertEqual(wizard.classify_conn(Exception("boom")), "other")
+        self.assertIn("http://", wizard.explain_conn(Exception("unknown url type: x")))
+
+    def test_yes_no_bracket_names_the_action_and_the_default(self):
+        seen = {}
+
+        def fake_input(prompt):
+            seen["prompt"] = prompt
+            return ""
+
+        with mock.patch("builtins.input", side_effect=fake_input):
+            wizard._confirm("重试？", default=True, actions="Y=重新输入地址，n=放弃")
+        self.assertIn("Y=重新输入地址", seen["prompt"])
+        self.assertIn("回车默认Y", seen["prompt"])
+
+    def test_a_failed_save_says_so(self):
+        with mock.patch.object(wizard.settings, "save", side_effect=OSError(13, "denied")), \
+                redirect_stdout(io.StringIO()) as out:
+            self.assertFalse(wizard.save_settings({"url": "http://x"}))
+        self.assertIn("没保存", out.getvalue())
