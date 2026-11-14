@@ -264,7 +264,8 @@ class FlowTest(unittest.TestCase):
     def test_config_unset(self):
         with mock.patch.dict(os.environ, {"JBMID_CONFIG_DIR": self.tmp}):
             settings.save({"archive": "/a"})
-            with mock.patch.object(wizard, "_choose", side_effect=["unset", "archive"]):
+            with mock.patch.object(wizard, "_choose",
+                                   side_effect=["unset", "archive", wizard._Back]):
                 run_output(wizard._flow_config, self.sess)
             self.assertNotIn("archive", settings.load())
 
@@ -417,3 +418,40 @@ class BackupDirTest(unittest.TestCase):
         sess = Session(FakeJf(), mock.MagicMock(), None, {"Version": "12"}, False, False)
         self.assertEqual(sess.backup_dir, os.path.join(os.getcwd(), "_local", "backups"))
         self.assertEqual(sess.out_dir, sess.backup_dir)
+
+
+class FirstRunTest(unittest.TestCase):
+    """First contact: URL + key + save, and the key can be kept out of the file."""
+
+    def setUp(self):
+        import tempfile
+        from jellyfin_bangumi_ids import settings
+        self.tmp = tempfile.TemporaryDirectory()
+        self.env = mock.patch.dict(os.environ, {"JBMID_CONFIG_DIR": self.tmp.name,
+                                                "JF_API_KEY": ""})
+        self.env.start()
+        self.addCleanup(self.env.stop)
+        self.addCleanup(self.tmp.cleanup)
+        self.settings = settings
+
+    def _run(self, save_key=True):
+        args = mock.Mock(timeout=5.0, no_save_key=not save_key, url=None, api_key=None)
+        with mock.patch.object(wizard, "_ask", return_value="http://jf:8096"), \
+                mock.patch.object(wizard.getpass, "getpass", return_value="k-123"), \
+                mock.patch.object(wizard.Jellyfin, "ping",
+                                  return_value={"version": "12.4.0", "users": 2,
+                                                "libraries": 8}), \
+                mock.patch.object(wizard, "_confirm", return_value=True):
+            return wizard._first_run(args, "http://127.0.0.1:8096", "")
+
+    def test_saves_url_and_key(self):
+        url, key = self._run()
+        self.assertEqual(url, "http://jf:8096")
+        self.assertEqual(key, "k-123")
+        self.assertEqual(self.settings.load()["url"], "http://jf:8096")
+        self.assertEqual(self.settings.load()["api_key"], "k-123")
+
+    def test_no_save_key_keeps_it_out(self):
+        self._run(save_key=False)
+        self.assertEqual(self.settings.load()["url"], "http://jf:8096")
+        self.assertNotIn("api_key", self.settings.load())

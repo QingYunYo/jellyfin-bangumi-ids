@@ -43,6 +43,20 @@ class Jellyfin:
             return raw.decode("utf-8", "replace")
 
     # -- library -----------------------------------------------------------
+    def ping(self) -> Dict[str, Any]:
+        """Prove the URL and key work, and return enough for a friendly line."""
+        info = self.get("/System/Info") or {}
+        try:
+            users = self.get("/Users") or []
+        except Exception:  # noqa: BLE001 - non-admin keys cannot list users
+            users = []
+        try:
+            libraries = self.libraries()
+        except Exception:  # noqa: BLE001
+            libraries = {}
+        return {"info": info, "version": info.get("Version") or "?",
+                "users": len(users), "libraries": len(libraries)}
+
     def libraries(self) -> Dict[str, str]:
         data = self.get("/Library/MediaFolders") or {}
         return {f["Name"]: f["Id"] for f in data.get("Items", [])}

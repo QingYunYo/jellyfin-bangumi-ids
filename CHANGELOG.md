@@ -4,6 +4,12 @@
 
 ## 0.1.5（未发布）
 
+- **一次设置，之后免参数**：`jbmid setup`（或首次直接运行 `jbmid`）依次询问 Jellyfin 地址、
+  API Key、离线档案，当场验证并写入 `~/.config/jellyfin-bangumi-ids/config.json`（0600）；
+  `--api-key` / `JF_API_KEY` / 配置文件 / 默认值 四级回落，`--no-save-key` 可让 Key 不落盘。
+  新增 `jbmid config --api-key`、`--test`，`jbmid config` 在终端里变成编辑菜单（地址 / Key / 档案 /
+  挂载点 / 测试 / 清空 / 显示），显示 Key 时打码；`jbmid` 裸跑在终端进入向导。文档把
+  「Jellyfin 地址（8096）不是 Bangumi」写清楚。
 - **发布前修正（评审后）**：`jbmid` 顶层不再吞掉 `SystemExit` 里的文字——缺少 API Key 时打印
   `missing API key: pass --api-key or set JF_API_KEY` 并返回 `1`（此前静默退出 `2`，和「没有终端」撞车）；
   `User-Agent` 改成真实版本号与仓库地址；`jbmid wizard` 支持 `--backup-dir` / `--out-dir`（默认仍是

@@ -101,8 +101,22 @@ jbmid doctor          # 连通性 + 数据源 + 插件状态
 ```
 
 `doctor` 会告诉你用的是在线 API 还是离线档案、插件是否已开 `TrustExistedBangumiId`。
-所有命令都接受 `--url` / `--api-key`，也支持 `--ipv4`（容器里只通 IPv4 时）和 `--timeout`。
-反复用到的值可以存起来：`jbmid config --url http://127.0.0.1:8096`、`jbmid config --archive DIR`，详见第 6 章。
+
+### 2.1 把连接信息存一次就够了
+
+第一次用直接跑 `jbmid setup`（或者在终端里直接敲 `jbmid`，它也会先带你设置）。它会问三件事，当场验证：
+
+1. **Jellyfin 地址**：`http://127.0.0.1:8096`。注意这是 **Jellyfin 媒体服务器**的地址（默认 8096 端口），
+   不是 Bangumi 的网址；Jellyfin 装在哪台机器就填那台的 IP，例如 `http://192.168.1.10:8096`。
+2. **API Key**：Jellyfin 控制台 → API 密钥 → 新建。
+3. **离线档案**（可选）：自动探测，找不到可以直接跳过，之后再补。
+
+回答完会连一次做校验，然后写进 `~/.config/jellyfin-bangumi-ids/config.json`（权限 0600），
+之后 `jbmid scan`、`jbmid wizard` 等命令直接用，**不用再 export 任何变量**。
+不想让 Key 落盘就加 `--no-save-key`，或继续用环境变量。
+
+所有命令仍接受 `--url` / `--api-key` 覆盖，也支持 `--ipv4`（容器里只通 IPv4 时）和 `--timeout`。
+改已有配置：`jbmid config`（终端里会进编辑菜单）、`jbmid config --test` 检查连通性，详见第 6 章。
 
 ## 3. 快速开始
 
@@ -179,7 +193,8 @@ episodes       : 0 to write
 
 ### 4.1 `wizard`：不想背参数就用它
 
-`jbmid wizard` 把常用流程做成菜单，**每个写操作都先给预览、再问一次**，默认答案是「不写」：
+`jbmid wizard` 把常用流程做成菜单，**每个写操作都先给预览、再问一次**，默认答案是「不写」。
+还没有配置过时它会先带你做一次设置（地址 / Key / 档案），以后直接进菜单；想重做用 `jbmid setup`：
 
 ```bash
 jbmid wizard            # 中文菜单（默认）
@@ -443,16 +458,19 @@ jbmid doctor
 不用每次敲参数：
 
 ```bash
-jbmid config --archive DIR            # 档案目录
-jbmid config --archive-root DIR       # 宿主机上 Jellyfin 的 data 挂载点
-jbmid config --url http://127.0.0.1:8096
-jbmid config                          # 只显示当前值
-jbmid config --unset archive          # 删掉某一项
+jbmid config --url http://127.0.0.1:8096   # Jellyfin 地址（默认 8096 端口），不是 Bangumi
+jbmid config --api-key KEY                 # 存 Key（明文，文件 0600；显示时打码）
+jbmid config --archive DIR                 # 档案目录
+jbmid config --archive-root DIR            # 宿主机上 Jellyfin 的 data 挂载点
+jbmid config --test                        # 用当前配置连一次，打印版本/用户数/库数
+jbmid config                               # 终端里进编辑菜单；管道里只打印
+jbmid config --unset archive               # 删掉某一项
 ```
 
 存在 `~/.config/jellyfin-bangumi-ids/config.json`（Windows 为 `%APPDATA%`，`JBMID_CONFIG_DIR` 可改），
-权限 0600，**不存 API Key**（只认 `--api-key` / `JF_API_KEY`）。文件坏了会打一行原因、把原件改名 `.bad`，
-下次保存不覆盖它。服务器地址的优先级：`--url` → `JF_URL` → `config` → 默认值。
+权限 0600；API Key 只在 `jbmid setup` / `jbmid config --api-key` 时明文写入，`--no-save-key`
+可以完全不落盘，显示时永远打码。文件坏了会打一行原因、把原件改名 `.bad`，下次保存不覆盖它。
+取值优先级：`--url` / `--api-key` → `JF_URL` / `JF_API_KEY` → 配置文件 → 默认值。
 
 常用环境变量：
 
@@ -551,7 +569,7 @@ jbmid config --unset archive          # 删掉某一项
 ## 10. 开发
 
 ```bash
-PYTHONPATH=src python -m unittest discover -s tests   # 184 个用例，全部离线（未 pip install -e . 时）
+PYTHONPATH=src python -m unittest discover -s tests   # 197 个用例，全部离线（未 pip install -e . 时）
 ```
 
 CI 在 Python 3.8 / 3.10 / 3.12 上跑同一套测试。目录结构：

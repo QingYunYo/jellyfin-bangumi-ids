@@ -1,8 +1,9 @@
 """A tiny persistent settings file for values that rarely change.
 
-Only ``archive`` / ``archive_root`` / ``url`` are stored: the API key stays in
-``JF_API_KEY`` so it never ends up on disk by accident.  The file is a plain
-JSON object, so users can edit it without this tool.
+``url`` / ``api_key`` / ``archive`` / ``archive_root`` are stored.  The API key is
+only written when the user asks for it (``jbmid setup`` / ``jbmid config --api-key``),
+the file is mode 0600, and ``--no-save-key`` keeps it out entirely.  The file is a
+plain JSON object, so users can edit it without this tool.
 """
 from __future__ import annotations
 
@@ -13,9 +14,18 @@ from typing import Dict
 
 APP = "jellyfin-bangumi-ids"
 FILENAME = "config.json"
-KEYS = ("archive", "archive_root", "url")
+KEYS = ("url", "api_key", "archive", "archive_root")
 
 LAST_ERROR: list = []
+
+
+def mask(value: str) -> str:
+    """Short, non-reversible hint for the UI: never print a full key."""
+    if not value:
+        return ""
+    if len(value) <= 8:
+        return "*" * len(value)
+    return value[:4] + "*" * 8 + value[-4:]
 
 
 def config_dir() -> str:

@@ -50,8 +50,8 @@ _T: Dict[str, Tuple[str, str]] = {
                "to accept every default (which does not write)."),
     "url": ("Jellyfin 地址", "Jellyfin URL"),
     "key": ("Jellyfin API Key", "Jellyfin API Key"),
-    "nokey": ("缺少 API Key：设置环境变量 JF_API_KEY（配置文件不存 Key）",
-              "missing API key: set the JF_API_KEY environment variable"),
+    "nokey": ("缺少 API Key：先跑一次 `jbmid setup`，或传 --api-key / 设 JF_API_KEY",
+              "missing API key: run `jbmid setup` once, or pass --api-key / set JF_API_KEY"),
     "conn": ("连不上 Jellyfin", "cannot reach Jellyfin"),
     "conn_hint": ("检查地址、防火墙，容器网络问题可加 --ipv4", "check the URL; try --ipv4"),
     "source_offline": ("数据源：离线档案", "data source: offline archive"),
@@ -105,6 +105,25 @@ _T: Dict[str, Tuple[str, str]] = {
     "more_backups": ("只列最近 %d 个；其余用 jbmid rollback <文件>",
                      "only the newest %d are listed; use jbmid rollback <file> for the rest"),
     "bad_limit": ("请输入数字（a=全部，0=返回）", "type a number (a = all, 0 = back)"),
+    "first_run": ("首次设置：三项就够，之后随时用 `jbmid config` 改。",
+                  "First run: three answers, change them later with `jbmid config`."),
+    "url_help": ("Jellyfin 地址（媒体服务器，不是 Bangumi 的网址）",
+                 "Jellyfin URL (the media server, not Bangumi)"),
+    "url_hint": ("直接回车保留当前值", "Enter keeps the current value"),
+    "save_config": ("保存到配置文件？", "Save it to the config file?"),
+    "saved_word": ("已保存", "saved"),
+    "not_saved": ("按 --no-save-key，不把 Key 写进文件", "--no-save-key: the key stays out of the file"),
+    "cfg_show": ("显示当前值", "show current values"),
+    "cfg_unset": ("清空某一项", "clear one value"),
+    "cfg_key": ("API Key（输入不回显）", "API Key (input is hidden)"),
+    "cfg_archive": ("离线档案目录", "offline archive directory"),
+    "cfg_root": ("宿主机上 Jellyfin 的 data 挂载点", "host directory holding Jellyfin's data mount"),
+    "trying": ("正在验证…", "checking…"),
+    "test_ok": ("连接成功：Jellyfin %s，%d 个用户，%d 个库",
+                "connected: Jellyfin %s, %d users, %d libraries"),
+    "test_fail": ("连接失败", "connection failed"),
+    "status": ("Jellyfin %s | 数据源 %s | Key %s", "Jellyfin %s | source %s | key %s"),
+    "retry": ("重试？", "Try again?"),
     "config_bad": ("（配置文件损坏，已忽略）", "(config file is broken, ignored)"),
 }
 
@@ -202,9 +221,10 @@ def _choose(prompt: str, options: List[Tuple[str, str]], back: Optional[str] = N
 
 class Session:
     def __init__(self, jf: Jellyfin, bgm, archive: Optional[str], info: Dict[str, Any],
-                 assume_yes: bool, write_default: bool,
+                 assume_yes: bool, write_default: bool, url: str = "",
                  backup_dir: Optional[str] = None, out_dir: Optional[str] = None):
         self.jf = jf
+        self.url = url
         self.bgm = bgm
         self.archive = archive
         self.info = info
@@ -243,40 +263,90 @@ def _banner(sess: Session) -> None:
         source = t("source_online")
     print("")
     print("jbmid %s   Jellyfin %s   %s" % (__version__, version, source))
+    masked = settings.mask(settings.load().get("api_key", "")) or "(unset)"
+    print("  " + t("status") % (sess.url or "?", sess.archive or t("source_online"), masked))
     print("-" * 62)
 
 
-def _open(args) -> Optional[Session]:
-    url = args.url or os.environ.get("JF_URL") or settings.load().get("url") or DEFAULT_URL
-    key = args.api_key or os.environ.get("JF_API_KEY") or ""
-    if not key and _NONINTERACTIVE[0]:
-        print(t("nokey"))
-        return None
-    while not key:
+def _first_run(args, url: str, key: str) -> Tuple[str, str]:
+    """Ask for URL + key once, prove they work, and offer to remember them."""
+    print("")
+    print("  %s" % t("first_run"))
+    url = _ask(t("url_help"), url or DEFAULT_URL, hint=t("url_hint")) or DEFAULT_URL
+    while True:
         try:
-            key = getpass.getpass("%s: " % t("key")).strip()
+            key = getpass.getpass("%s: " % t("cfg_key")).strip()
         except (EOFError, KeyboardInterrupt):
-            if _NONINTERACTIVE[0]:
-                print(t("nokey"))
-                return None
             _eof()
-            return None
+            return url, key
         if not key:
+            print("  %s" % t("nokey"))
+            continue
+        print("  %s" % t("trying"))
+        try:
+            info = Jellyfin(url, key, timeout=getattr(args, "timeout", 20.0)).ping()
+        except Exception as exc:  # noqa: BLE001 - explain, never traceback
+            print("  %s: %s" % (t("test_fail"), exc))
+            if not _confirm(t("retry"), default=True):
+                return url, ""
+            continue
+        print("  " + t("test_ok") % (info["version"], info["users"], info["libraries"]))
+        break
+    if _confirm(t("save_config"), default=True):
+        values = {"url": url}
+        if getattr(args, "no_save_key", False):
+            print("  %s (api_key)" % t("not_saved"))
+        else:
+            values["api_key"] = key
+        settings.save(values)
+        print("  %s: %s" % (t("saved_word"), settings.config_path()))
+    return url, key
+
+
+def _open(args, force_setup: bool = False) -> Optional[Session]:
+    stored = settings.load()
+    url = getattr(args, "url", None) or os.environ.get("JF_URL") or stored.get("url") or DEFAULT_URL
+    key = getattr(args, "api_key", None) or os.environ.get("JF_API_KEY") or stored.get("api_key") or ""
+    interactive = not _NONINTERACTIVE[0] and sys.stdin.isatty()
+    if force_setup or (not key and interactive):
+        if not interactive:
             print(t("nokey"))
             return None
+        url, key = _first_run(args, url, key)
+    if not key:
+        print(t("nokey"))
+        return None
     jf = Jellyfin(url, key, timeout=getattr(args, "timeout", 20.0))
     try:
         info = jf.get("/System/Info") or {}
     except Exception as exc:  # noqa: BLE001 - a wizard must explain, not traceback
         print("%s: %s" % (t("conn"), exc))
+        if interactive:
+            fixed = _ask(t("url_help"), url, hint=t("url_hint"))
+            if fixed and fixed != url:
+                url = fixed
+                jf = Jellyfin(url, key, timeout=getattr(args, "timeout", 20.0))
+                try:
+                    info = jf.get("/System/Info") or {}
+                except Exception as exc2:  # noqa: BLE001
+                    print("%s: %s" % (t("conn"), exc2))
+                    print(t("conn_hint"))
+                    return None
+                if _confirm(t("save_config"), default=True):
+                    settings.save({"url": url})
+                return _session(args, jf, info, url)
         print(t("conn_hint"))
         return None
+    return _session(args, jf, info, url)
+
+
+def _session(args, jf, info, url: str) -> Session:
     archive = _archive(args, jf)
     bgm = Bangumi(timeout=max(getattr(args, "timeout", 20.0), 10))
     if archive:
         bgm = OfflineBangumi(ArchiveIndex(archive, verbose=False), bgm, label=archive)
     return Session(jf, bgm, archive, info, getattr(args, "yes", False),
-                   getattr(args, "write", False),
+                   getattr(args, "write", False), url=url,
                    backup_dir=getattr(args, "backup_dir", None),
                    out_dir=getattr(args, "out_dir", None))
 
@@ -598,27 +668,112 @@ def _flow_rollback(sess: Session) -> None:
     _print_tail(sess, None, "%s rollback %s" % (_cmd(), path))
 
 
-def _flow_config(sess: Session) -> None:
+def _show_config(sess: Session) -> None:
     data = settings.load()
     print("")
     print("  config: %s" % settings.config_path())
     if settings.LAST_ERROR:
         print("          %s" % t("config_bad"))
     for key in settings.KEYS:
-        print("  %-13s: %s" % (key, data.get(key) or "(unset)"))
-    mode = _choose(t("config"), [("archive", "archive"), ("archive_root", "archive_root"),
-                                 ("url", "url"), ("unset", "--unset")], back=t("back_menu"))
-    if mode == "unset":
-        key = _choose("key", [(k, k) for k in settings.KEYS], back=t("back_menu"))
-        settings.unset(key)
-        print("  unset: %s" % key)
-        return
-    value = _ask(mode, data.get(mode, ""), hint=_h(t("back_menu")))
-    if value == "0":
-        return
-    if value:
-        settings.save({mode: os.path.abspath(os.path.expanduser(value)) if mode != "url" else value})
-        print("  saved: %s = %s" % (mode, value))
+        value = data.get(key) or "(unset)"
+        if key == "api_key":
+            value = settings.mask(data.get(key, "")) or "(unset)"
+        print("  %-13s: %s" % (key, value))
+    print("  %-13s: %s" % ("url in use", sess.url or "?"))
+
+
+def _flow_config(sess: Session) -> None:
+    """Edit every stored value, test the connection, clear a value."""
+    while True:
+        _show_config(sess)
+        try:
+            mode = _choose(t("config"), [
+                ("url", t("cfg_url")), ("api_key", t("cfg_key")),
+                ("archive", t("cfg_archive")), ("archive_root", t("cfg_root")),
+                ("test", t("test")), ("show", t("cfg_show")), ("unset", t("cfg_unset")),
+            ], back=t("back_menu"))
+        except _Back:
+            return
+        data = settings.load()
+        if mode == "test":
+            print("  %s" % t("trying"))
+            try:
+                info = sess.jf.ping()
+                print("  " + t("test_ok") % (info["version"], info["users"], info["libraries"]))
+            except Exception as exc:  # noqa: BLE001
+                print("  %s: %s" % (t("test_fail"), exc))
+            continue
+        if mode == "show":
+            continue
+        if mode == "unset":
+            try:
+                key = _choose("key", [(k, k) for k in settings.KEYS], back=t("back_menu"))
+            except _Back:
+                continue
+            settings.unset(key)
+            print("  unset: %s" % key)
+            continue
+        if mode == "api_key":
+            try:
+                value = getpass.getpass("%s: " % t("cfg_key")).strip()
+            except (EOFError, KeyboardInterrupt):
+                _eof()
+                return
+            if not value:
+                continue
+            try:
+                info = Jellyfin(sess.url, value, timeout=20.0).ping()
+                print("  " + t("test_ok") % (info["version"], info["users"], info["libraries"]))
+            except Exception as exc:  # noqa: BLE001
+                print("  %s: %s" % (t("test_fail"), exc))
+                if not _confirm(t("save_config"), default=False):
+                    continue
+            settings.save({"api_key": value})
+            sess.jf = Jellyfin(sess.url, value, timeout=getattr(sess.jf, "timeout", 20.0))
+            print("  %s: %s" % (t("saved_word"), settings.config_path()))
+            continue
+        default = data.get(mode, "") if mode != "url" else (data.get("url") or sess.url)
+        value = _ask(mode, default, hint=t("url_hint"))
+        if not value or value == "0":
+            continue
+        if mode in ("archive", "archive_root"):
+            value = os.path.abspath(os.path.expanduser(value))
+        settings.save({mode: value})
+        print("  %s: %s = %s" % (t("saved_word"), mode, value))
+        if mode == "url":
+            sess.url = value
+            sess.jf = Jellyfin(value, getattr(sess.jf, "api_key", ""), timeout=20.0)
+            try:
+                sess.info = sess.jf.get("/System/Info") or {}
+            except Exception:  # noqa: BLE001
+                pass
+        if mode == "archive":
+            sess.archive = value
+            sess.bgm = OfflineBangumi(ArchiveIndex(value, verbose=False), Bangumi(), label=value)
+
+
+def setup(args) -> int:
+    """``jbmid setup``: ask the three questions again, even if configured."""
+    try:
+        sess = _open(args, force_setup=True)
+    except _Back:
+        return 0
+    if sess is None:
+        return 1
+    _banner(sess)
+    return 0
+
+
+def config_flow(args) -> int:
+    """``jbmid config`` with no flags in a terminal: the editor, then exit."""
+    try:
+        sess = _open(args)
+    except _Back:
+        return 0
+    if sess is None:
+        return 1
+    _flow_config(sess)
+    return 0
 
 
 def _flow_single(sess: Session) -> None:

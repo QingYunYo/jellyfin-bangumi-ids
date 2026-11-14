@@ -29,10 +29,19 @@ class SettingsTest(unittest.TestCase):
                          os.path.join(self.tmp.name, "config.json"))
 
     def test_unknown_keys_are_ignored(self):
-        settings.save({"api_key": "secret", "archive": "/a"})
+        settings.save({"bogus": "x", "archive": "/a"})
         raw = json.load(open(settings.config_path(), encoding="utf-8"))
-        self.assertNotIn("api_key", raw)
-        self.assertNotIn("api_key", settings.load())
+        self.assertNotIn("bogus", raw)
+        self.assertNotIn("bogus", settings.load())
+
+    def test_api_key_is_stored_and_masked(self):
+        settings.save({"api_key": "TESTKEY0123456789abcdef0123456789ab"})
+        self.assertEqual(settings.load()["api_key"], "TESTKEY0123456789abcdef0123456789ab")
+        shown = settings.mask(settings.load()["api_key"])
+        self.assertNotIn("c3cd496e", shown)
+        self.assertTrue(shown.startswith("e76c"))
+        self.assertEqual(settings.mask("short"), "*****")
+        self.assertEqual(settings.mask(""), "")
 
     def test_unset_removes_one_key(self):
         settings.save({"archive": "/a", "url": "http://x"})

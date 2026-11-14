@@ -20,7 +20,7 @@ from .season import load_mapping, scan_seasons
 from .sync import run_sync
 from .transport import HttpError, NetError, force_ipv4, set_verbose
 from .verify import fail_on_breaches, run_verify, run_verify_offline
-from .wizard import run as run_wizard
+from .wizard import config_flow as config_wizard, run as run_wizard, setup as run_setup
 
 DEFAULT_URL = "http://127.0.0.1:8096"
 
@@ -28,8 +28,8 @@ DEFAULT_URL = "http://127.0.0.1:8096"
 def common(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--url", default=None,
                         help="Jellyfin base URL (default: JF_URL, then the config file)")
-    parser.add_argument("--api-key", default=os.environ.get("JF_API_KEY", ""),
-                        help="Jellyfin API key (env JF_API_KEY)")
+    parser.add_argument("--api-key", default=None,
+                        help="Jellyfin API key (default: JF_API_KEY, then the config file)")
     parser.add_argument("--ipv4", action="store_true",
                         help="force IPv4 lookups (fixes 20 s hangs on hosts with broken IPv6)")
     parser.add_argument("--timeout", type=float, default=20.0,
@@ -53,12 +53,21 @@ def server_url(args: argparse.Namespace) -> str:
     return url
 
 
+def api_key(args: argparse.Namespace) -> str:
+    """--api-key -> JF_API_KEY -> config file -> a one-line hint, never a traceback."""
+    key = getattr(args, "api_key", None) or os.environ.get("JF_API_KEY") \
+        or settings.load().get("api_key") or ""
+    if not key:
+        raise SystemExit("missing API key: run `jbmid setup` once, pass --api-key, "
+                         "or set JF_API_KEY")
+    args.api_key = key
+    return key
+
+
 def clients(args: argparse.Namespace):
     if args.ipv4:
         force_ipv4()
-    if not args.api_key:
-        raise SystemExit("missing API key: pass --api-key or set JF_API_KEY")
-    jf = Jellyfin(server_url(args), args.api_key, timeout=args.timeout)
+    jf = Jellyfin(server_url(args), api_key(args), timeout=args.timeout)
     bgm = Bangumi(timeout=max(args.timeout, 10))
     return jf, bgm
 
@@ -319,24 +328,46 @@ def cmd_config(args: argparse.Namespace) -> int:
         settings.unset(key)
         print("unset     : %s" % key)
     values = {}
-    for key in ("archive", "archive_root", "url"):
+    for key in ("archive", "archive_root"):
         value = getattr(args, key, None)
         if value:
-            values[key] = os.path.abspath(os.path.expanduser(value)) if key != "url" else value
+            values[key] = os.path.abspath(os.path.expanduser(value))
+    for key in ("url", "api_key"):
+        value = getattr(args, key, None)
+        if value:
+            values[key] = value
     if values:
-        settings.save(values)
+        try:
+            settings.save(values)
+        except OSError as exc:
+            print("cannot write %s (%s); keep using JF_URL / JF_API_KEY / JBMID_ARCHIVE"
+                  % (settings.config_path(), exc), file=sys.stderr)
+            return 1
         print("saved     : %s" % ", ".join(sorted(values)))
+    if args.test:
+        info = Jellyfin(server_url(args), api_key(args),
+                        timeout=getattr(args, "timeout", 20.0)).ping()
+        print("jellyfin  : %s (%d users, %d libraries)" % (
+            info["version"], info["users"], info["libraries"]))
+        return 0
     data = settings.load()
     print("config    : %s (%s)" % (settings.config_path(),
                                    "exists" if os.path.exists(settings.config_path()) else "missing"))
     if settings.LAST_ERROR:
         print("            %s" % settings.LAST_ERROR[0])
     for key in settings.KEYS:
-        print("%-13s: %s" % (key, data.get(key) or "(unset)"))
-    if not data:
-        print("")
-        print("example   : jbmid config --archive-root /vol1/1000/Docker/Jellyfin")
+        value = data.get(key) or "(unset)"
+        if key == "api_key":
+            value = settings.mask(data.get(key, "")) or "(unset)"
+        print("%-13s: %s" % (key, value))
+    print("%-13s: %s" % ("url in use", server_url(args)))
+    if not values and not (args.unset or []) and sys.stdin.isatty():
+        return config_wizard(args)
     return 0
+
+
+def cmd_setup(args: argparse.Namespace) -> int:
+    return run_setup(args)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -501,16 +532,26 @@ def build_parser() -> argparse.ArgumentParser:
                    help="where the wizard writes undo files (default: ./_local/backups)")
     p.add_argument("--out-dir", metavar="DIR",
                    help="where the wizard writes reports (default: same as --backup-dir)")
+    p.add_argument("--no-save-key", action="store_true",
+                   help="keep the API key out of the config file")
     p.set_defaults(func=cmd_wizard)
 
-    p = sub.add_parser("config", help="remember the archive path or the server URL")
+    p = sub.add_parser("config", help="remember the Jellyfin URL/API key and the archive path")
+    p.add_argument("--api-key", help="Jellyfin API key (stored as plain text, file mode 0600)")
+    p.add_argument("--test", action="store_true", help="check the stored URL and key, then exit")
     p.add_argument("--archive", metavar="DIR", help="Bangumi plugin archive directory")
     p.add_argument("--archive-root", metavar="DIR",
                    help="host directory that contains Jellyfin's data mount")
-    p.add_argument("--url", help="Jellyfin base URL")
+    p.add_argument("--url", help="Jellyfin base URL, e.g. http://192.168.1.10:8096")
     p.add_argument("--unset", action="append", choices=list(settings.KEYS), metavar="KEY",
-                   help="remove a stored value (archive / archive_root / url)")
+                   help="remove a stored value (url / api_key / archive / archive_root)")
     p.set_defaults(func=cmd_config)
+
+    p = sub.add_parser("setup", help="first-run setup: Jellyfin URL, API key, offline archive")
+    common(p)
+    p.add_argument("--no-save-key", action="store_true",
+                   help="ask for the key every run; keep it out of the config file")
+    p.set_defaults(func=cmd_setup)
     return parser
 
 
@@ -547,6 +588,13 @@ def main(argv: Optional[List[str]] = None) -> int:
     parser = build_parser()
     raw = sys.argv[1:] if argv is None else list(argv)
     if not raw:
+        if sys.stdin.isatty():
+            # First contact: the wizard asks for URL/key once, then shows the menu.
+            return run_wizard(argparse.Namespace(
+                url=None, api_key=None, ipv4=False, timeout=20.0, archive=None,
+                archive_root=None, search_archive=False, no_archive=False, verbose=False,
+                verbose_global=False, lang=None, yes=False, write=False,
+                backup_dir=None, out_dir=None))
         parser.print_help()
         return 0
     try:

@@ -27,3 +27,31 @@ class MissingKeyTest(unittest.TestCase):
         with redirect_stderr(io.StringIO()):
             code = cli.main(["scan", "--no-such-flag"])
         self.assertEqual(code, 2)
+
+
+class StoredKeyTest(unittest.TestCase):
+    """The key can come from the config file, so nothing has to be exported."""
+
+    def setUp(self):
+        import tempfile
+        from jellyfin_bangumi_ids import settings
+        self.tmp = tempfile.TemporaryDirectory()
+        self.env = mock.patch.dict(os.environ, {"JBMID_CONFIG_DIR": self.tmp.name,
+                                                "JF_API_KEY": ""})
+        self.env.start()
+        self.addCleanup(self.env.stop)
+        self.addCleanup(self.tmp.cleanup)
+        settings.save({"url": "http://jf.example:8096", "api_key": "from-file"})
+        self.args = mock.Mock(api_key=None)
+
+    def test_key_falls_back_to_the_config_file(self):
+        self.assertEqual(cli.api_key(self.args), "from-file")
+        self.assertEqual(self.args.api_key, "from-file")
+
+    def test_flag_wins_over_the_file(self):
+        self.args.api_key = "from-flag"
+        self.assertEqual(cli.api_key(self.args), "from-flag")
+
+    def test_url_comes_from_the_file(self):
+        args = mock.Mock(url=None)
+        self.assertEqual(cli.server_url(args), "http://jf.example:8096")

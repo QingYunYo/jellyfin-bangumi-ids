@@ -108,9 +108,26 @@ jbmid doctor          # connectivity, data source, plugin state
 ```
 
 `doctor` reports whether it uses the live API or the offline archive, and whether the plugin has
-`TrustExistedBangumiId` enabled. Every command also accepts `--url` / `--api-key`, plus `--ipv4`
-(containers with no IPv6) and `--timeout`. Values you keep reusing can be stored with
-`jbmid config --url http://127.0.0.1:8096` or `jbmid config --archive DIR` (see chapter 6).
+`TrustExistedBangumiId` on.
+
+### 2.1 Store the connection once
+
+Run `jbmid setup` the first time (or just type `jbmid` in a terminal — it walks you through setup).
+It asks three things and verifies them right away:
+
+1. **Jellyfin URL** — `http://127.0.0.1:8096`. This is the **Jellyfin media server** (port 8096 by
+   default), not Bangumi; use the IP of the machine running Jellyfin, e.g. `http://192.168.1.10:8096`.
+2. **API key** — Jellyfin dashboard → API Keys → create one.
+3. **Offline archive** (optional) — auto-detected; skip it and add it later if you want.
+
+The answers are checked against the server and written to
+`~/.config/jellyfin-bangumi-ids/config.json` (mode 0600), so `jbmid scan`, `jbmid wizard` and friends
+work afterwards **without exporting anything**. Pass `--no-save-key` to keep the key off disk, or keep
+using the environment variables.
+
+Every command still accepts `--url` / `--api-key` to override, plus `--ipv4` (IPv4-only containers)
+and `--timeout`. To change stored values later: `jbmid config` (an editor in a terminal) and
+`jbmid config --test` to check the connection — details in chapter 6.
 
 ## 3. Quick start
 
@@ -464,17 +481,20 @@ prints every path it tried and why it failed (`missing` / `unreadable`) — fix 
 ### 6.1 Remember the paths: `jbmid config`
 
 ```bash
-jbmid config --archive DIR            # archive directory
-jbmid config --archive-root DIR       # host directory that holds Jellyfin's data mount
-jbmid config --url http://127.0.0.1:8096
-jbmid config                          # just print the current values
-jbmid config --unset archive          # drop one value
+jbmid config --url http://127.0.0.1:8096   # Jellyfin URL (port 8096), not Bangumi
+jbmid config --api-key KEY                 # store the key (plain text, file 0600, masked on display)
+jbmid config --archive DIR                 # archive directory
+jbmid config --archive-root DIR            # host directory that holds Jellyfin's data mount
+jbmid config --test                        # connect once and print version / users / libraries
+jbmid config                               # editor in a terminal, plain print when piped
+jbmid config --unset archive               # drop one value
 ```
 
 Stored in `~/.config/jellyfin-bangumi-ids/config.json` (`%APPDATA%` on Windows, override with
-`JBMID_CONFIG_DIR`), mode 0600, and **never the API key** (that is `--api-key` / `JF_API_KEY` only). A
-corrupt file is reported and renamed to `.bad` so the next save cannot overwrite it. Server URL order:
-`--url` → `JF_URL` → `config` → default.
+`JBMID_CONFIG_DIR`), mode 0600. The API key is only written in plain text by `jbmid setup` /
+`jbmid config --api-key`; `--no-save-key` keeps it off disk entirely, and it is always masked when
+displayed. A corrupt file is reported and renamed to `.bad` so the next save cannot overwrite it.
+Resolution order: `--url` / `--api-key` → `JF_URL` / `JF_API_KEY` → config file → default.
 
 Environment variables:
 
@@ -580,7 +600,7 @@ movies.
 ## 10. Development
 
 ```bash
-PYTHONPATH=src python -m unittest discover -s tests   # 184 cases, fully offline (if not pip install -e .)
+PYTHONPATH=src python -m unittest discover -s tests   # 197 cases, fully offline (if not pip install -e .)
 ```
 
 CI runs the same suite on Python 3.8 / 3.10 / 3.12. Layout:
