@@ -368,10 +368,12 @@ def cmd_config(args: argparse.Namespace) -> int:
         values["archive_root"] = root_dir
         values["archive"] = derived
         print("derived   : archive = %s" % derived)
-    for key in ("url", "api_key"):
+    for key in ("url", "api_key", "lang"):
         value = getattr(args, key, None)
         if value:
             values[key] = value
+    if values.get("lang"):
+        set_lang(values["lang"])
     if values:
         if values.get("archive_root") is None and "archive_root" in values:
             values.pop("archive_root")
@@ -567,7 +569,8 @@ def build_parser() -> argparse.ArgumentParser:
 
     p = sub.add_parser("wizard", help="interactive picker for the common flows")
     common(p)
-    p.add_argument("--lang", choices=["zh", "en"], default=None, help="menu language")
+    p.add_argument("--lang", choices=["zh", "en"], default=argparse.SUPPRESS,
+                   help="menu language (also accepted before the subcommand)")
     p.add_argument("--yes", action="store_true",
                    help="non-interactive: take every default (which never writes)")
     p.add_argument("--write", action="store_true",
@@ -587,6 +590,8 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--archive-root", metavar="DIR",
                    help="host directory that contains Jellyfin's data mount")
     p.add_argument("--url", help="Jellyfin base URL, e.g. http://192.168.1.10:8096")
+    p.add_argument("--lang", choices=("zh", "en"), default=argparse.SUPPRESS,
+                   help="interface language, stored for next time")
     p.add_argument("--unset", action="append", choices=list(settings.KEYS), metavar="KEY",
                    help="remove a stored value (url / api_key / archive / archive_root)")
     p.set_defaults(func=cmd_config)
@@ -595,7 +600,8 @@ def build_parser() -> argparse.ArgumentParser:
     common(p)
     p.add_argument("--no-save-key", action="store_true",
                    help="ask for the key every run; keep it out of the config file")
-    p.add_argument("--lang", choices=["zh", "en"], default=None, help="menu language")
+    p.add_argument("--lang", choices=["zh", "en"], default=argparse.SUPPRESS,
+                   help="menu language (also accepted before the subcommand)")
     p.set_defaults(func=cmd_setup)
     return parser
 
