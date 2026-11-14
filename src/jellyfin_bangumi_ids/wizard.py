@@ -22,7 +22,8 @@ from .anchor import run_seasons
 from .bangumi import Bangumi
 from .jellyfin import Jellyfin
 from .transport import build_url, force_ipv4, get_json
-from .offline import (ArchiveIndex, OfflineBangumi, archive_hint, attempts, find_archive)
+from .offline import (ArchiveIndex, OfflineBangumi, archive_hint, attempts,
+                      derive_from_root, find_archive, looks_like_archive)
 from .scan import apply_report, rollback, run_scan
 from .scan import run_specials
 from .sync import run_sync
@@ -165,6 +166,26 @@ _T: Dict[str, Tuple[str, str]] = {
                      "JBMID_CONFIG_DIR to a writable directory, or use sudo."),
     "cfg_archive": ("离线档案目录", "offline archive directory"),
     "cfg_root": ("宿主机上 Jellyfin 的 data 挂载点", "host directory holding Jellyfin's data mount"),
+    "cfg_lang": ("界面语言", "interface language"),
+    "ask_lang": ("界面语言（中文 / English）", "interface language (中文 / English)"),
+    "lang_saved": ("界面语言：%s", "interface language: %s"),
+    "archive_step": ("接着配离线档案：能让扫描快 40 倍，回车跳过（走在线 API）。",
+                     "next: the offline archive makes scans ~40x faster; Enter skips it (online API)."),
+    "ask_archive_path": ("离线档案目录（Bangumi 插件下载的 archive；填绝对路径，回车跳过）",
+                         "offline archive directory (download by the Bangumi plugin; absolute path, Enter skips)"),
+    "ask_root": ("Jellyfin 的 data 目录（Windows 默认 C:\\ProgramData\\Jellyfin\\Server\\data；"
+                 "Docker 填 /config 对应的宿主机目录；回车跳过）",
+                 "Jellyfin's data directory (Windows: C:\\ProgramData\\Jellyfin\\Server\\data; "
+                 "Docker: the host directory mounted at /config; Enter skips)"),
+    "archive_ok": ("识别到 %s 个 subject / %s 个 episode", "found %s subjects / %s episodes"),
+    "bad_path_abs": ("请填绝对路径，例如 /vol1/1000/Docker/Jellyfin/config/data/bangumi/archive",
+                     "use an absolute path, e.g. /vol1/1000/Docker/Jellyfin/config/data/bangumi/archive"),
+    "bad_path": ("目录不存在", "no such directory"),
+    "bad_archive": ("这不是 Bangumi 档案目录（缺 episode.jsonlines）",
+                    "not a Bangumi archive (episode.jsonlines is missing)"),
+    "root_none": ("这个目录下没找到 data/bangumi/archive，换个目录或直接跳过",
+                  "no data/bangumi/archive under it; try another directory or skip"),
+    "root_derived": ("已推导出档案目录：%s", "derived the archive directory: %s"),
     "trying": ("正在验证…", "checking…"),
     "test_ok": ("连接成功：Jellyfin %s，%d 个用户，%d 个库",
                 "connected: Jellyfin %s, %d users, %d libraries"),
@@ -467,10 +488,116 @@ def _ask_key(args) -> str:
     return key
 
 
+def _abs_path(raw: str) -> Optional[str]:
+    """Absolute path or nothing; a bare "3" must never become <cwd>/3."""
+    text = (raw or "").strip()
+    if not text:
+        return None
+    text = os.path.expanduser(text)
+    if not os.path.isabs(text):
+        return None
+    return os.path.normpath(text)
+
+
+def _archive_ok(path: str) -> Tuple[bool, str]:
+    """Check the directory really is the plugin's archive, and say what was found."""
+    if not os.path.isdir(path):
+        return False, t("bad_path")
+    if not looks_like_archive(path):
+        return False, t("bad_archive")
+    try:
+        counts = ArchiveIndex(path, verbose=False).counts()
+    except Exception as exc:  # noqa: BLE001 - a bad archive is a message, not a crash
+        return False, "%s: %s" % (t("bad_archive"), exc)
+    return True, t("archive_ok") % (counts.get("subjects", 0), counts.get("episodes", 0))
+
+
+def _ask_archive_path(default: str = "") -> Optional[str]:
+    """Ask until the path is absolute and really holds an archive; None = skip."""
+    while True:
+        try:
+            raw = _ask_back(t("ask_archive_path"))
+        except _Back:
+            return None
+        if not raw:
+            return None
+        path = _abs_path(raw)
+        if not path:
+            print("  " + t("bad_path_abs"))
+            continue
+        ok, detail = _archive_ok(path)
+        print("  " + detail)
+        if not ok:
+            continue
+        return path
+
+
+def _ask_archive_root(default: str = "") -> Optional[str]:
+    """Ask for Jellyfin's data directory and derive the archive from it."""
+    while True:
+        try:
+            raw = _ask_back(t("ask_root"))
+        except _Back:
+            return None
+        if not raw:
+            return None
+        path = _abs_path(raw)
+        if not path:
+            print("  " + t("bad_path_abs"))
+            continue
+        if not os.path.isdir(path):
+            print("  " + t("bad_path"))
+            continue
+        found = derive_from_root(path)
+        if not found:
+            print("  " + t("root_none"))
+            continue
+        ok, detail = _archive_ok(found)
+        print("  " + detail)
+        if not ok:
+            continue
+        print("  " + t("root_derived") % found)
+        return path
+
+
+def _save_archive(path: str) -> bool:
+    """Store the archive and drop a stale root: only one path may win."""
+    if not save_settings({"archive": path}):
+        return False
+    if settings.load().get("archive_root"):
+        try:
+            settings.unset("archive_root")
+        except OSError:
+            pass
+    return True
+
+
+def _save_archive_root(root: str) -> bool:
+    found = derive_from_root(root)
+    if not found:
+        return False
+    return save_settings({"archive_root": root, "archive": found})
+
+
+def _ask_lang() -> str:
+    current = language()
+    try:
+        choice = _choose(t("ask_lang"), [("zh", "中文"), ("en", "English")],
+                         back=t("back_menu"))
+    except _Back:
+        return current
+    if choice != current:
+        set_lang(choice)
+        save_settings({"lang": choice})
+    return choice
+
+
 def _first_run(args, url: str, key: str) -> Tuple[str, str]:
     """Ask for URL + key, prove they work, re-ask the field that actually failed."""
     print("")
     print("  %s" % t("first_run"))
+    _ask_lang()
+    print("")
     url = _ask_url(args, url or DEFAULT_URL)
     for attempt in range(3):
         try:
@@ -539,6 +666,16 @@ def _first_run(args, url: str, key: str) -> Tuple[str, str]:
         save_settings(values)
     else:
         print("  %s" % t("no_save_any"))
+    print("")
+    print("  " + t("archive_step"))
+    path = _ask_archive_path()
+    if path:
+        if _save_archive(path):
+            print("  %s: archive = %s" % (t("wrote"), path))
+    else:
+        root = _ask_archive_root()
+        if root and _save_archive_root(root):
+            print("  %s: archive_root = %s" % (t("wrote"), root))
     return url, key
 
 
@@ -927,18 +1064,19 @@ def _show_config(sess: Session) -> None:
 
 
 def _flow_config(sess: Session) -> None:
-    """Edit every stored value, test the connection, clear a value."""
+    """Edit one value at a time; every path is checked before it is stored."""
+    _show_config(sess)
+    data = settings.load()
     while True:
-        _show_config(sess)
+        print("")
         try:
             mode = _choose(t("config"), [
                 ("url", t("cfg_url")), ("api_key", t("cfg_key")),
                 ("archive", t("cfg_archive")), ("archive_root", t("cfg_root")),
-                ("test", t("test")), ("show", t("cfg_show")), ("unset", t("cfg_unset")),
+                ("lang", t("cfg_lang")), ("test", t("test")), ("unset", t("cfg_unset")),
             ], back=t("back_menu"))
         except _Back:
             return
-        data = settings.load()
         if mode == "test":
             print("  %s" % t("trying"))
             try:
@@ -947,7 +1085,9 @@ def _flow_config(sess: Session) -> None:
             except Exception as exc:  # noqa: BLE001
                 print("  %s: %s" % (t("test_fail"), explain_conn(exc)))
             continue
-        if mode == "show":
+        if mode == "lang":
+            _ask_lang()
+            print("  " + t("lang_saved") % language())
             continue
         if mode == "unset":
             try:
@@ -976,29 +1116,40 @@ def _flow_config(sess: Session) -> None:
             if save_settings({"api_key": value}):
                 sess.jf = Jellyfin(changed_url, value, timeout=getattr(sess.jf, "timeout", 20.0))
             continue
-        prompts = {"url": t("url_help"), "archive": t("ask_archive"),
-                   "archive_root": t("ask_archive_root")}
-        default = data.get(mode, "") if mode != "url" else (data.get("url") or sess.url)
+        if mode in ("archive", "archive_root"):
+            if mode == "archive":
+                path = _ask_archive_path()
+                if not path:
+                    continue
+                if _save_archive(path):
+                    print("  %s: archive = %s" % (t("wrote"), path))
+                    sess.archive = path
+                    sess.bgm = OfflineBangumi(ArchiveIndex(path, verbose=False), Bangumi(), label=path)
+                continue
+            root = _ask_archive_root()
+            if not root:
+                continue
+            if _save_archive_root(root):
+                found = derive_from_root(root) or ""
+                print("  %s: archive_root = %s" % (t("wrote"), root))
+                if found:
+                    sess.archive = found
+                    sess.bgm = OfflineBangumi(ArchiveIndex(found, verbose=False), Bangumi(), label=found)
+            continue
         hint = "直接回车保留当前值" if _LANG[0] == "zh" else "Enter keeps the current value"
-        raw = _ask(prompts.get(mode, mode), default, hint=hint, ascii_only=(mode == "url"))
+        raw = _ask(t("url_help"), data.get("url") or sess.url, hint=hint, ascii_only=True)
         if not raw:
             continue
-        value = normalize_url(raw) if mode == "url" else raw
-        if mode in ("archive", "archive_root"):
-            value = os.path.abspath(os.path.expanduser(value))
-        if not save_settings({mode: value}):
+        value = normalize_url(raw)
+        if not save_settings({"url": value}):
             continue
-        print("  %s: %s = %s" % (t("wrote"), mode, value))
-        if mode == "url":
-            sess.url = value
-            sess.jf = Jellyfin(value, getattr(sess.jf, "api_key", ""), timeout=20.0)
-            try:
-                sess.info = sess.jf.get("/System/Info") or {}
-            except Exception:  # noqa: BLE001
-                pass
-        if mode == "archive":
-            sess.archive = value
-            sess.bgm = OfflineBangumi(ArchiveIndex(value, verbose=False), Bangumi(), label=value)
+        print("  %s: url = %s" % (t("wrote"), value))
+        sess.url = value
+        sess.jf = Jellyfin(value, getattr(sess.jf, "api_key", ""), timeout=20.0)
+        try:
+            sess.info = sess.jf.get("/System/Info") or {}
+        except Exception:  # noqa: BLE001
+            pass
 
 
 class _Args:

@@ -43,21 +43,30 @@ cd jellyfin-bangumi-ids
 
 Prefer a real install without touching system Python? `python3 -m venv .venv && . .venv/bin/activate && pip install -e .`
 
-### 1.1 First run: three answers
+### 1.1 First run: language, address, key, archive
 
 ```bash
 ./jbmid               # or just jbmid once installed
 ```
 
-With no config yet it goes straight into setup: it first checks the address against
-`/System/Info/Public` (no key needed), then asks for the key, then for the archive — so a wrong
-address never makes you retype the key. The three questions:
+With no config yet it goes straight into setup, four questions (the last two may be skipped):
 
-1. **Jellyfin URL** — the media server (port 8096 by default), **not Bangumi**; an IP is fine,
-   `192.168.1.10:8096` is completed to `http://192.168.1.10:8096` for you.
-2. **Jellyfin API key** — dashboard → API Keys → create. It is typed **visibly**, so a bad paste is
-   obvious; after Enter you see only a masked summary (`e76c********84d0`) plus a length hint.
-3. **Offline archive** (optional) — auto-detected; skip it and add it later.
+1. **Interface language** — `zh` / `en`, remembered after the first pick; `jbmid --lang en ...`
+   changes it later and stores the choice.
+2. **Jellyfin URL** — the media server (port 8096 by default), **not Bangumi**; an IP is fine,
+   `192.168.1.10:8096` becomes `http://192.168.1.10:8096`. It checks `/System/Info/Public` first
+   (no key needed), so a wrong address never makes you retype the key.
+3. **Jellyfin API key** — dashboard → API Keys → create. Typed **visibly**; after Enter you see a
+   masked summary (`e76c********84d0`) and a length hint.
+4. **Offline archive** (optional) — the archive directory used by the Bangumi plugin; Enter skips it.
+   If skipped, it asks for **Jellyfin's data directory** instead (Windows:
+   `C:\ProgramData\Jellyfin\Server\data`; Docker: the host directory mounted at `/config`),
+   and derives `.../data/bangumi/archive` from it.
+
+Paths are checked before they are stored: absolute, existing, and containing `episode.jsonlines`;
+it then prints `found 694202 subjects / 1705871 episodes`. A bad path is re-asked, never written —
+a relative `3` is refused instead of silently becoming `<cwd>/3`. `archive` and `archive_root`
+never both take effect: storing one clears/derives the other, so exactly one path wins.
 
 The answers are verified against the server and written to
 `~/.config/jellyfin-bangumi-ids/config.json` (mode 0600), so later commands need **no environment
@@ -476,11 +485,12 @@ prints every path it tried and why it failed (`missing` / `unreadable`) — fix 
 ```bash
 jbmid config --url http://127.0.0.1:8096   # Jellyfin URL (port 8096), not Bangumi
 jbmid config --api-key KEY                 # store the key (plain text, file 0600, masked on display)
-jbmid config --archive DIR                 # archive directory
-jbmid config --archive-root DIR            # host directory that holds Jellyfin's data mount
+jbmid config --archive DIR                 # archive directory (absolute, with episode.jsonlines)
+jbmid config --archive-root DIR            # Jellyfin's data directory; the archive is derived
+jbmid config --lang en                     # interface language, stored for next time
 jbmid config --test                        # connect once and print version / users / libraries
 jbmid config                               # editor in a terminal, plain print when piped
-jbmid config --unset archive               # drop one value
+jbmid config --unset archive               # drop one value (url/api_key/archive/archive_root/lang)
 ```
 
 Stored in `~/.config/jellyfin-bangumi-ids/config.json` (`%APPDATA%` on Windows, override with
@@ -505,8 +515,9 @@ Environment variables:
 The server URL is resolved as `--url` → `JF_URL` → `jbmid config --url` → `http://127.0.0.1:8096`.
 
 The language follows your locale: `LC_ALL`/`LC_MESSAGES`/`LANG` starting with `zh` gives Chinese,
-any other valid locale gives English, and `C`/`POSIX`/unset means Chinese. Force it with
-`JBMID_LANG=zh|en` or the wizard's `--lang`. Subcommand reports and error messages follow the same rule.
+any other valid locale gives English, and `C`/`POSIX`/unset means Chinese. The first run asks once
+and **remembers** the answer; a top-level `jbmid --lang zh|en` updates the config, while
+`JBMID_LANG=zh|en` only overrides the current run.
 
 The SQLite index lives in `~/.cache/jellyfin-bangumi-ids/` (`JBMID_CACHE` overrides it), about 150 MB, and
 the source files stay read-only. The archive is maintained by the plugin's "update offline database" task (roughly every two weeks); when it is stale the live API wins.

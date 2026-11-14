@@ -55,3 +55,27 @@ class StoredKeyTest(unittest.TestCase):
     def test_url_comes_from_the_file(self):
         args = mock.Mock(url=None)
         self.assertEqual(cli.server_url(args), "http://jf.example:8096")
+
+
+class LanguageFlagTest(unittest.TestCase):
+    """--lang is a preference at the top level, not a one-shot on the wizard."""
+
+    def setUp(self):
+        import tempfile
+        from jellyfin_bangumi_ids import settings
+        self.settings = settings
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.env = mock.patch.dict(os.environ, {"JBMID_CONFIG_DIR": self.tmp.name})
+        self.env.start()
+        self.addCleanup(self.env.stop)
+
+    def test_top_level_flag_parses_before_the_subcommand(self):
+        args = cli.build_parser().parse_args(["--lang", "zh", "config"])
+        self.assertEqual(args.lang, "zh")
+
+    def test_top_level_flag_is_stored(self):
+        with mock.patch.object(cli, "cmd_doctor", return_value=0), \
+                redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()):
+            self.assertEqual(cli.main(["--lang", "en", "doctor"]), 0)
+        self.assertEqual(self.settings.load()["lang"], "en")

@@ -14,7 +14,8 @@ from .anchor import run_anchor, run_seasons
 from .auto import scan_auto
 from .bangumi import Bangumi
 from .jellyfin import Jellyfin
-from .offline import (attempts, archive_hint, ArchiveIndex, OfflineBangumi, find_archive)
+from .offline import (attempts, archive_hint, ArchiveIndex, OfflineBangumi,
+                      derive_from_root, find_archive, looks_like_archive)
 from .scan import apply_report, log, rollback, run_scan, run_specials
 from .season import load_mapping, scan_seasons
 from .sync import run_sync
@@ -326,20 +327,58 @@ def cmd_wizard(args: argparse.Namespace) -> int:
     return run_wizard(args)
 
 
+def _checked_path(raw: str, want_archive: bool) -> Optional[str]:
+    """Absolute + existing; an archive must really hold the plugin's jsonlines."""
+    path = os.path.expanduser(raw.strip())
+    if not os.path.isabs(path):
+        print("use an absolute path, e.g. /vol1/1000/Docker/Jellyfin/config/data/bangumi/archive",
+              file=sys.stderr)
+        return None
+    path = os.path.normpath(path)
+    if not os.path.isdir(path):
+        print("no such directory: %s" % path, file=sys.stderr)
+        return None
+    if want_archive and not looks_like_archive(path):
+        print("not a Bangumi archive (episode.jsonlines is missing): %s" % path, file=sys.stderr)
+        return None
+    return path
+
+
 def cmd_config(args: argparse.Namespace) -> int:
     for key in args.unset or []:
         settings.unset(key)
         print("unset     : %s" % key)
     values = {}
-    for key in ("archive", "archive_root"):
-        value = getattr(args, key, None)
-        if value:
-            values[key] = os.path.abspath(os.path.expanduser(value))
+    archive = getattr(args, "archive", None)
+    if archive:
+        path = _checked_path(archive, want_archive=True)
+        if path is None:
+            return 1
+        values["archive"] = path
+        values["archive_root"] = None  # only one path may win
+    root = getattr(args, "archive_root", None)
+    if root:
+        root_dir = _checked_path(root, want_archive=False)
+        if root_dir is None:
+            return 1
+        derived = derive_from_root(root_dir)
+        if not derived:
+            print("no data/bangumi/archive under %s" % root_dir, file=sys.stderr)
+            return 1
+        values["archive_root"] = root_dir
+        values["archive"] = derived
+        print("derived   : archive = %s" % derived)
     for key in ("url", "api_key"):
         value = getattr(args, key, None)
         if value:
             values[key] = value
     if values:
+        if values.get("archive_root") is None and "archive_root" in values:
+            values.pop("archive_root")
+            try:
+                settings.unset("archive_root")
+            except OSError:
+                pass
         try:
             settings.save(values)
         except OSError as exc:
@@ -379,6 +418,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--version", action="version", version="jbmid " + __version__)
     parser.add_argument("-v", "--verbose", action="store_true", dest="verbose_global",
                         help="print every HTTP request (also accepted after a subcommand)")
+    parser.add_argument("--lang", choices=("zh", "en"),
+                        help="interface language for the menus and for this run; stored for next time")
     sub = parser.add_subparsers(dest="command", required=True)
 
     p = sub.add_parser("scan", help="scan a library and write a report")
@@ -624,6 +665,13 @@ def main(argv: Optional[List[str]] = None) -> int:
         args = parser.parse_args(raw)
         if getattr(args, "verbose", False) or getattr(args, "verbose_global", False):
             set_verbose(True)
+        if getattr(args, "lang", None):
+            # A top-level --lang is a preference, not a one-shot: remember it.
+            set_lang(args.lang)
+            try:
+                settings.save({"lang": args.lang})
+            except OSError:
+                pass
         return args.func(args)
     except KeyboardInterrupt:
         log("interrupted")

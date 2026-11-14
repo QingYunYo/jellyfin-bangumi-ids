@@ -61,6 +61,25 @@ def looks_like_archive(path: Optional[str]) -> bool:
         return False
 
 
+def derive_from_root(root: Optional[str]) -> Optional[str]:
+    """Turn a Jellyfin data directory into the plugin's archive directory.
+
+    Users know where Jellyfin keeps ``data`` (``/config`` in Docker,
+    ``C:\\ProgramData\\Jellyfin\\Server\\data`` on Windows); the plugin keeps the
+    archive under ``data/bangumi/archive``.  Accept the data directory itself or
+    any parent of it, and return the first candidate that really holds an
+    archive.
+    """
+    if not root:
+        return None
+    base = os.path.abspath(os.path.expanduser(root))
+    for rel in ("data/bangumi/archive", "bangumi/archive", "archive", "."):
+        candidate = os.path.normpath(os.path.join(base, rel))
+        if looks_like_archive(candidate):
+            return candidate
+    return None
+
+
 def _candidates_from_jellyfin(jf) -> List[str]:
     try:
         info = jf.get("/System/Info") or {}

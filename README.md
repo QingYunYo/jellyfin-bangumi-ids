@@ -41,20 +41,29 @@ cd jellyfin-bangumi-ids
 
 想装进虚拟环境：`python3 -m venv .venv && . .venv/bin/activate && pip install -e .`。
 
-### 1.1 第一次运行：回答三个问题
+### 1.1 第一次运行：语言、地址、Key，然后档案
 
 ```bash
 ./jbmid               # 装过就是 jbmid
 ```
 
-还没有配置时，它直接进首次设置：先用 `/System/Info/Public` 确认地址可达（不需要 Key），
-再问 Key，最后问档案——所以地址写错时不会再让你白输一遍 Key。
+还没有配置时，它直接进首次设置，四个问题（后两个可跳过）：
 
-1. **Jellyfin 地址**——媒体服务器的地址（默认 8096 端口），**不是 Bangumi 的网址**；
+1. **界面语言**——`zh` / `en`，选一次就记住；之后 `jbmid --lang en ...` 也能改，且会写进配置。
+2. **Jellyfin 地址**——媒体服务器的地址（默认 8096 端口），**不是 Bangumi 的网址**；
    填 IP 也行，`192.168.1.10:8096` 会自动补成 `http://192.168.1.10:8096`。
-2. **Jellyfin API Key**——Jellyfin 控制台 → API 密钥 → 新建。输入时可见，粘错能当场发现；
-   回车后只显示打码摘要（`e76c********84d0`），并提示长度是否像 32 位。
-3. **离线档案**（可选）——自动探测，找不到可以直接跳过，之后再补。
+   它先用 `/System/Info/Public` 确认地址可达（不需要 Key），所以地址写错时不会白输一遍 Key。
+3. **Jellyfin API Key**——控制台 → API 密钥 → 新建。输入时可见，粘错能当场发现；
+   回车后只显示打码摘要（`e76c********84d0`）并提示长度是否像 32 位。
+4. **离线档案**（可选）——填 Bangumi 插件的 archive 目录，回车跳过。跳过时会再问一次
+   **Jellyfin 的 data 目录**（Windows 默认 `C:\ProgramData\Jellyfin\Server\data`；
+   Docker 填 `/config` 对应的宿主机目录，如 `/vol1/1000/Docker/Jellyfin/config`），
+   用它自动推导 `…/data/bangumi/archive`。
+
+路径先校验再保存：必须是绝对路径、目录必须存在、必须含 `episode.jsonlines`；通过后打印
+`识别到 694202 个 subject / 1705871 个 episode`。填错只提示重填、不写盘，`3` 这类相对路径
+会被拒绝（不会悄悄变成当前目录下的 `3`）。`archive` 与 `archive_root` 不会同时生效：填 archive
+就清掉 root，填 root 就推导出 archive 再存，任何时刻只有一个路径在起作用。
 
 验证通过后写进 `~/.config/jellyfin-bangumi-ids/config.json`（权限 0600），之后的命令直接用，
 **不用再 export 任何变量**。不想让 Key 落盘加 `--no-save-key`；介意肩窥再加 `--hide-key`。
@@ -444,11 +453,12 @@ jbmid doctor
 ```bash
 jbmid config --url http://127.0.0.1:8096   # Jellyfin 地址（默认 8096 端口），不是 Bangumi
 jbmid config --api-key KEY                 # 存 Key（明文，文件 0600；显示时打码）
-jbmid config --archive DIR                 # 档案目录
-jbmid config --archive-root DIR            # 宿主机上 Jellyfin 的 data 挂载点
+jbmid config --archive DIR                 # 档案目录（必须是含 episode.jsonlines 的绝对路径）
+jbmid config --archive-root DIR            # Jellyfin 的 data 目录，自动推导出 archive
+jbmid config --lang zh                     # 界面语言，写进配置；`jbmid --lang en` 也可
 jbmid config --test                        # 用当前配置连一次，打印版本/用户数/库数
 jbmid config                               # 终端里进编辑菜单；管道里只打印
-jbmid config --unset archive               # 删掉某一项
+jbmid config --unset archive               # 删掉某一项（url/api_key/archive/archive_root/lang）
 ```
 
 存在 `~/.config/jellyfin-bangumi-ids/config.json`（Windows 为 `%APPDATA%`，`JBMID_CONFIG_DIR` 可改），
@@ -472,7 +482,8 @@ jbmid config --unset archive               # 删掉某一项
 服务器地址的取值顺序：`--url` → `JF_URL` → `jbmid config --url` → 默认 `http://127.0.0.1:8096`。
 
 语言默认跟随系统 locale：`LC_ALL`/`LC_MESSAGES`/`LANG` 是 `zh*` 就中文，是其它有效 locale 就英文，
-`C`/`POSIX`/未设置时按中文处理；`JBMID_LANG=zh|en` 或向导的 `--lang` 可强制指定。
+`C`/`POSIX`/未设置时按中文处理。首次设置会问一次并**记住**；之后顶层 `jbmid --lang zh|en`
+会改配置，`JBMID_LANG=zh|en` 只覆盖当次运行。
 子命令（scan/verify/apply…）的报告与错误信息同样跟随这个判断。
 
 索引缓存放在 `~/.cache/jellyfin-bangumi-ids/`（`JBMID_CACHE` 可改），约 150 MB，只读源文件；

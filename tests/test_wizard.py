@@ -444,7 +444,10 @@ class FirstRunTest(unittest.TestCase):
                 mock.patch.object(wizard.Jellyfin, "ping",
                                   return_value={"version": "12.4.0", "users": 2,
                                                 "libraries": 8}), \
-                mock.patch.object(wizard, "_confirm", return_value=True):
+                mock.patch.object(wizard, "_confirm", return_value=True), \
+                mock.patch.object(wizard, "_ask_lang", return_value="zh"), \
+                mock.patch.object(wizard, "_ask_archive_path", return_value=None), \
+                mock.patch.object(wizard, "_ask_archive_root", return_value=None):
             return wizard._first_run(args, "http://127.0.0.1:8096", "")
 
     def test_saves_url_and_key(self):
@@ -552,3 +555,115 @@ class LanguageTest(unittest.TestCase):
         self.assertEqual(wizard.t("retry"), "Try again?")
         wizard.set_lang("zh")
         self.assertEqual(wizard.t("retry"), "重试？")
+
+
+class PathValidationTest(unittest.TestCase):
+    """A path is checked before it is stored: no <cwd>/3, no half-archives."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.env = mock.patch.dict(os.environ, {"JBMID_CONFIG_DIR": self.tmp.name})
+        self.env.start()
+        self.addCleanup(self.env.stop)
+        wizard._LANG[0] = "zh"
+
+    def _archive_dir(self, name="archive"):
+        path = os.path.join(self.tmp.name, name)
+        os.makedirs(path, exist_ok=True)
+        with open(os.path.join(path, "episode.jsonlines"), "w", encoding="utf-8") as fh:
+            fh.write('{"id": 1, "subject_id": 1, "sort": 1, "type": 0, "name": "x"}\n')
+        with open(os.path.join(path, "subject.jsonlines"), "w", encoding="utf-8") as fh:
+            fh.write('{"id": 1, "type": 2, "name": "y", "name_cn": "y"}\n')
+        return path
+
+    def test_relative_path_is_refused(self):
+        self.assertIsNone(wizard._abs_path("3"))
+        self.assertIsNone(wizard._abs_path(""))
+        self.assertTrue(os.path.isabs(wizard._abs_path("~/x") or ""))
+
+    def test_missing_archive_is_reported_not_stored(self):
+        ok, detail = wizard._archive_ok(os.path.join(self.tmp.name, "nope"))
+        self.assertFalse(ok)
+        self.assertEqual(detail, wizard.t("bad_path"))
+        empty = os.path.join(self.tmp.name, "empty")
+        os.makedirs(empty)
+        ok, detail = wizard._archive_ok(empty)
+        self.assertFalse(ok)
+        self.assertEqual(detail, wizard.t("bad_archive"))
+
+    def test_valid_archive_reports_its_size(self):
+        path = self._archive_dir()
+        ok, detail = wizard._archive_ok(path)
+        self.assertTrue(ok)
+        self.assertIn("1", detail)
+
+    def test_asking_rejects_relative_then_takes_the_real_one(self):
+        path = self._archive_dir()
+        with mock.patch.object(wizard, "_ask_back", side_effect=["3", path]), \
+                redirect_stdout(io.StringIO()) as out:
+            self.assertEqual(wizard._ask_archive_path(), path)
+        self.assertIn(wizard.t("bad_path_abs"), out.getvalue())
+
+    def test_enter_skips(self):
+        with mock.patch.object(wizard, "_ask_back", return_value=None), \
+                redirect_stdout(io.StringIO()):
+            self.assertIsNone(wizard._ask_archive_path())
+
+    def test_saving_an_archive_drops_a_stale_root(self):
+        path = self._archive_dir()
+        settings.save({"archive_root": "/old/root"})
+        with redirect_stdout(io.StringIO()):
+            self.assertTrue(wizard._save_archive(path))
+        self.assertEqual(settings.load()["archive"], path)
+        self.assertNotIn("archive_root", settings.load())
+
+    def test_a_root_derives_the_archive(self):
+        data = os.path.join(self.tmp.name, "data")
+        archive = os.path.join(data, "bangumi", "archive")
+        os.makedirs(archive, exist_ok=True)
+        for name in ("episode", "subject"):
+            with open(os.path.join(archive, name + ".jsonlines"), "w", encoding="utf-8") as fh:
+                fh.write('{"id": 1}\n')
+        self.assertEqual(wizard.derive_from_root(data), archive)
+        with redirect_stdout(io.StringIO()):
+            self.assertTrue(wizard._save_archive_root(data))
+        self.assertEqual(settings.load()["archive"], archive)
+        self.assertEqual(settings.load()["archive_root"], data)
+
+
+class ConfigMenuTest(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.env = mock.patch.dict(os.environ, {"JBMID_CONFIG_DIR": self.tmp.name})
+        self.env.start()
+        self.addCleanup(self.env.stop)
+        wizard._LANG[0] = "zh"
+
+    def test_menu_has_a_language_row_and_no_show_row(self):
+        seen = {}
+
+        def fake_choose(prompt, options, back=None):
+            seen["labels"] = [label for _, label in options]
+            raise wizard._Back
+
+        with mock.patch.object(wizard, "_choose", side_effect=fake_choose), \
+                redirect_stdout(io.StringIO()):
+            wizard._flow_config(session(self.tmp.name))
+        self.assertIn(wizard.t("cfg_lang"), seen["labels"])
+        self.assertNotIn(wizard.t("cfg_show"), seen["labels"])
+
+    def test_whole_menu_prints_the_values_only_once(self):
+        calls = {"n": 0}
+
+        def fake_show(sess):
+            calls["n"] += 1
+
+        with mock.patch.object(wizard, "_show_config", side_effect=fake_show), \
+                mock.patch.object(wizard, "_choose",
+                                  side_effect=["lang", wizard._Back]), \
+                mock.patch.object(wizard, "_ask_lang", return_value="zh"), \
+                redirect_stdout(io.StringIO()):
+            wizard._flow_config(session(self.tmp.name))
+        self.assertEqual(calls["n"], 1)
