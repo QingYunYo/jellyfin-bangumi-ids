@@ -134,7 +134,7 @@ episodes       : 0 to write
 | `protect` | 让插件别覆盖手写 ID | — | 改插件配置 |
 | `rollback` | 按备份还原 | 备份 JSON | 写 |
 | `doctor` | 连通性 / 数据源 / 插件状态 | — | 只读 |
-| `wizard` | 交互向导：上面这些流程点菜单 | — | 默认只预览 |
+| `wizard` | 向导：体检 / 集级 / 季级 / 番外 / 一条龙 / 回滚 / 单剧 / 配置 | — | 默认只预览 |
 | `config` | 记住档案路径 / 服务器地址 | — | 写配置文件 |
 
 ### 4.1 `wizard`：不想背参数就用它
@@ -144,17 +144,20 @@ episodes       : 0 to write
 ```bash
 jbmid wizard            # 中文菜单（默认）
 jbmid wizard --lang en  # 英文菜单
-jbmid wizard --write    # 提前把「确认写入」设为是（仍然先预览）
-jbmid wizard --yes      # 非交互：全部取默认值（默认不写，适合冒烟测试）
+jbmid wizard --write    # 把「确认写入」的默认值改成是（仍然先预览、仍然要你按回车）
+jbmid wizard --yes      # 非交互：全部取默认值，写操作一律不执行，只适合冒烟
 ```
 
-菜单有八项：体检、修集级、修季级、修番外、一条龙、回滚、单剧/单库、配置。启动时会自动解析
-服务器地址与离线档案（顺序同第 6 章）；找不到档案时不是干问路径，而是先把尝试过的路径和失败原因
-打出来，再让你选「手输路径 / 告诉宿主挂载点 / 先用在线」。
+菜单有八项：体检、修集级、修季级、修番外、一条龙、回滚、单剧、配置。启动时先解析服务器地址
+（`--url` → `JF_URL` → `config` → 默认）与离线档案（顺序同第 6 章）；找不到档案时不是干问路径，
+而是先把尝试过的路径和失败原因打出来，再让你选「手输路径 / 告诉宿主挂载点 / 先用在线」。
 
-每次写入结束会打印三件事：备份文件、`jbmid rollback <备份>` 的还原命令、以及等价的非交互命令
-（方便你确认没问题后抄进 cron）。非交互环境（管道、CI）会直接拒绝并提示用子命令，除非显式
-`--yes`。
+一次改动超过 50 条时，光按 `y` 不够，要照着数字再敲一遍条数；还原备份同样走这个阈值。每次写入
+结束会打印三件事：备份文件、`jbmid rollback <备份>` 的还原命令、以及等价的非交互命令（方便你确认
+没问题后抄进 cron）。非交互环境（管道、CI）直接拒绝并返回 2，除非显式 `--yes`。
+
+退出码：`0` 正常结束；`1` 连不上 Jellyfin；`2` 没有可交互终端且没给 `--yes`；`130` 被 Ctrl-C
+或输入流结束打断。
 
 ### 4.2 `scan`：先看清全局，再动手
 
@@ -464,14 +467,15 @@ jbmid doctor
 ## 10. 开发
 
 ```bash
-PYTHONPATH=src python -m unittest discover -s tests   # 143 个用例，全部离线（未 pip install -e . 时）
+PYTHONPATH=src python -m unittest discover -s tests   # 170 个用例，全部离线（未 pip install -e . 时）
 ```
 
 CI 在 Python 3.8 / 3.10 / 3.12 上跑同一套测试。目录结构：
 
 ```text
 src/jellyfin_bangumi_ids/
-  cli.py       命令行入口（scan/apply/season/auto/special/anchor/verify/sync/rollback/protect/doctor）
+  cli.py       命令行入口（scan/apply/season/auto/special/anchor/verify/sync/rollback/protect/doctor/config/wizard）
+  wizard.py    交互向导（八项菜单，写前预览、批量阈值）
   jellyfin.py  Jellyfin 客户端（重试、ProviderIds 读改写）
   bangumi.py   Bangumi API v0 客户端
   offline.py   离线档案后端（只读 + 自动回退在线）
@@ -484,6 +488,7 @@ src/jellyfin_bangumi_ids/
   verify.py    只读体检（--by-series / --fail-on）
   sync.py      一条龙：scan → apply → 季级 → 番外 → verify
   transport.py HTTP、IPv4 强制、重试
+  settings.py  记住档案路径/服务器地址（不存 API Key）
 ```
 
 发版：改 `pyproject.toml` 与 `__init__.py` 的版本号 → 更新 `CHANGELOG.md` → 打注记标签 → 在 GitHub

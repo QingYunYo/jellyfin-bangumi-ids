@@ -21,6 +21,7 @@ from . import __version__, settings
 from .anchor import run_seasons
 from .bangumi import Bangumi
 from .jellyfin import Jellyfin
+from .transport import force_ipv4
 from .offline import (ArchiveIndex, OfflineBangumi, archive_hint, attempts, find_archive)
 from .scan import apply_report, rollback, run_scan
 from .scan import run_specials
@@ -33,14 +34,18 @@ _T: Dict[str, Tuple[str, str]] = {
     "title": ("终端向导", "terminal wizard"),
     "menu": ("选择", "choose"),
     "back": ("回车继续…", "press enter to continue…"),
+    "back_menu": ("返回", "back"),
     "bye": ("再见。", "bye."),
+    "noninteractive": ("非交互模式：全部取默认值（写操作一律不执行）。",
+                       "non-interactive: every default is taken (nothing is written)."),
     "nontty": ("没有可交互的终端；脚本请直接用子命令（如 jbmid sync --dry-run），"
                "或加 --yes 接受全部默认值（默认不写入）。",
                "no interactive terminal; use the subcommands in scripts, or pass --yes "
                "to accept every default (which does not write)."),
     "url": ("Jellyfin 地址", "Jellyfin URL"),
     "key": ("Jellyfin API Key", "Jellyfin API Key"),
-    "nokey": ("缺少 API Key：设置 JF_API_KEY 或运行 jbmid config", "missing API key: set JF_API_KEY"),
+    "nokey": ("缺少 API Key：设置环境变量 JF_API_KEY（配置文件不存 Key）",
+              "missing API key: set the JF_API_KEY environment variable"),
     "conn": ("连不上 Jellyfin", "cannot reach Jellyfin"),
     "conn_hint": ("检查地址、防火墙，容器网络问题可加 --ipv4", "check the URL; try --ipv4"),
     "source_offline": ("数据源：离线档案", "data source: offline archive"),
@@ -84,7 +89,6 @@ _T: Dict[str, Tuple[str, str]] = {
     "no_backups": ("找不到备份文件（先跑一次会写库的操作）。", "no backup files yet."),
     "pick_backup": ("选择备份编号", "pick a backup number"),
     "restore_confirm": ("确认用这个备份还原？", "restore from this backup?"),
-    "year": ("", ""),
 }
 
 
@@ -94,6 +98,7 @@ def t(key: str) -> str:
 
 
 _LANG = ["zh"]
+_NONINTERACTIVE = [False]
 
 
 def _ask(prompt: str, default: str = "") -> str:
@@ -101,6 +106,8 @@ def _ask(prompt: str, default: str = "") -> str:
     try:
         raw = input("%s%s: " % (prompt, tail))
     except EOFError:
+        if _NONINTERACTIVE[0]:
+            return default
         raise SystemExit(130)
     return raw.strip() or default
 
@@ -110,6 +117,8 @@ def _confirm(prompt: str, default: bool = False) -> bool:
     try:
         raw = input("%s%s: " % (prompt, tail)).strip().lower()
     except EOFError:
+        if _NONINTERACTIVE[0]:
+            return default
         raise SystemExit(130)
     if not raw:
         return default
@@ -151,10 +160,11 @@ class Session:
         return os.path.join(self.backup_dir, "%s-%s-report.json" % (kind, stamp))
 
     def confirm(self, prompt: str) -> bool:
-        # --yes takes the default answer, and every write prompt defaults to no.
+        # --yes takes the default answer, and every write prompt defaults to no;
+        # --write only flips that default, it never skips the question.
         if self.assume_yes:
             return False
-        return _confirm(prompt, default=False)
+        return _confirm(prompt, default=self.write_default)
 
     def write_allowed(self) -> bool:
         return self.write_default
@@ -196,6 +206,8 @@ def _open(args) -> Optional[Session]:
 
 
 def _archive(args, jf) -> Optional[str]:
+    if getattr(args, "no_archive", False):
+        return None
     configured = settings.load().get("archive")
     extra = [("config", configured)] if configured else []
     found = find_archive(jf, getattr(args, "archive", None),
@@ -235,13 +247,15 @@ def _library(sess: Session) -> Optional[str]:
 
 
 def _limit() -> Optional[int]:
-    raw = _ask(t("limit"), "3")
+    raw = _ask(t("limit"))
     return int(raw) if raw.isdigit() and int(raw) > 0 else None
 
 
 def _series(sess: Session, library: Optional[str]) -> str:
     series = sess.jf.all_series(library_name=library)
     visible = series[:40]
+    if len(series) > len(visible):
+        print("  (1-%d of %d)" % (len(visible), len(series)))
     for index, item in enumerate(visible, 1):
         print("  %3d) %s" % (index, item.get("Name")))
     while True:
@@ -265,6 +279,10 @@ def _bulk_confirm(sess: Session, count: int) -> bool:
         return True
     typed = _ask("%s (%d)" % (t("bulk"), count))
     return typed.strip() == str(count)
+
+
+def _lib(library: Optional[str]) -> str:
+    return " --library %s" % library if library else ""
 
 
 def _print_tail(sess: Session, backup: Optional[str], equivalent: str) -> None:
@@ -315,14 +333,18 @@ def _flow_episodes(sess: Session, library: Optional[str] = None,
     print("")
     print("  %-16s %s" % (t("written"), stats["written"],
                            ))
-    equivalent = "jbmid scan --library %s%s && jbmid apply %s" % (
-        library or "", " --limit %d" % limit if limit else "", out)
+    equivalent = "jbmid scan%s%s%s && jbmid apply %s" % (
+        _lib(library), " --series-id %s" % series_id if series_id else "",
+        " --limit %d" % limit if limit else "", out)
     _print_tail(sess, backup if os.path.exists(backup) else None, equivalent)
 
 
-def _flow_seasons(sess: Session) -> None:
-    library = _library(sess)
-    plan = run_seasons(sess.jf, sess.bgm, library=library, all_series=True, dry_run=True)
+def _flow_seasons(sess: Session, library: Optional[str] = None,
+                  series_id: Optional[str] = None) -> None:
+    library = library if library is not None else _library(sess)
+    ids = [series_id] if series_id else None
+    plan = run_seasons(sess.jf, sess.bgm, library=library, all_series=True, dry_run=True,
+                       series_ids=ids)
     planned = int(plan.get("planned") or 0)
     print("")
     print("  %-16s %s" % ("seasons to fix", planned))
@@ -334,16 +356,19 @@ def _flow_seasons(sess: Session) -> None:
         return
     backup = sess.backup_path("seasons")
     run_seasons(sess.jf, sess.bgm, library=library, all_series=True, dry_run=False,
-                backup_path=backup)
+                backup_path=backup, series_ids=ids)
     _print_tail(sess, backup if os.path.exists(backup) else None,
-                "jbmid anchor --seasons --all --library %s" % (library or ""))
+                "jbmid anchor --seasons --all%s%s" % (
+                    _lib(library), " --series-id %s" % series_id if series_id else ""))
 
 
-def _flow_specials(sess: Session) -> None:
-    library = _library(sess)
-    limit = _limit()
+def _flow_specials(sess: Session, library: Optional[str] = None,
+                   series_id: Optional[str] = None) -> None:
+    library = library if library is not None else _library(sess)
+    limit = None if series_id else _limit()
     out = sess.report_path("specials")
-    report = run_specials(sess.jf, sess.bgm, library=library, limit=limit, out=out)
+    report = run_specials(sess.jf, sess.bgm, library=library, limit=limit, out=out,
+                          series_ids=[series_id] if series_id else None)
     summary = report["summary"]
     print("")
     print("  %-16s %s" % ("matched", summary.get("specials_matched", 0)))
@@ -358,31 +383,54 @@ def _flow_specials(sess: Session) -> None:
     backup = sess.backup_path("specials")
     apply_report(sess.jf, report, backup_path=backup)
     _print_tail(sess, backup if os.path.exists(backup) else None,
-                "jbmid special --library %s && jbmid apply %s" % (library or "", out))
+                "jbmid special%s%s && jbmid apply %s" % (
+                    _lib(library), " --series-id %s" % series_id if series_id else "", out))
 
 
 def _flow_sync(sess: Session) -> None:
     library = _library(sess)
     limit = _limit()
-    dry = not sess.confirm(t("confirm_write"))
     backup_dir = sess.backup_dir
     os.makedirs(backup_dir, exist_ok=True)
+    # preview first: the same pipeline, writing nothing
+    preview = run_sync(sess.jf, sess.bgm, archive=sess.archive, library=library, limit=limit,
+                       dry_run=True, backup_dir=backup_dir)
+    print("")
+    print("  %-16s %s" % ("exit", preview.get("exit")))
+    for step in preview.get("steps") or []:
+        print("  %-16s %s" % (step.get("step"), "ok" if step.get("ok") else step.get("error")))
+    if not sess.confirm(t("confirm_write")):
+        print(t("cancelled"))
+        _print_tail(sess, None, "jbmid sync%s%s --dry-run" % (
+            _lib(library), " --limit %d" % limit if limit else ""))
+        return
     result = run_sync(sess.jf, sess.bgm, archive=sess.archive, library=library, limit=limit,
-                      dry_run=dry, backup_dir=backup_dir)
+                      dry_run=False, backup_dir=backup_dir)
     print("")
     print("  %-16s %s" % ("exit", result.get("exit")))
     for step in result.get("steps") or []:
         print("  %-16s %s" % (step.get("step"), "ok" if step.get("ok") else step.get("error")))
-    _print_tail(sess, None,
-                "jbmid sync --library %s%s%s" % (library or "", " --limit %d" % limit if limit else "",
-                                                 " --dry-run" if dry else ""))
+    _print_tail(sess, result.get("backup"),
+                "jbmid sync%s%s" % (_lib(library), " --limit %d" % limit if limit else ""))
+
+
+def _is_backup(path: str) -> bool:
+    """A backup is a list of rows with item_id/new; reports are not."""
+    try:
+        with open(path, encoding="utf-8") as fh:
+            data = json.load(fh)
+    except (OSError, ValueError):
+        return False
+    return isinstance(data, list) and all(isinstance(row, dict) and "item_id" in row for row in data)
 
 
 def _flow_rollback(sess: Session) -> None:
     if not os.path.isdir(sess.backup_dir):
         print(t("no_backups"))
         return
-    names = sorted((n for n in os.listdir(sess.backup_dir) if n.endswith(".json")), reverse=True)
+    names = sorted((n for n in os.listdir(sess.backup_dir)
+                    if n.endswith(".json") and _is_backup(os.path.join(sess.backup_dir, n))),
+                   reverse=True)
     if not names:
         print(t("no_backups"))
         return
@@ -394,7 +442,12 @@ def _flow_rollback(sess: Session) -> None:
         return
     path = os.path.join(sess.backup_dir, names[int(raw) - 1])
     rollback(sess.jf, path, dry_run=True)
-    if not sess.confirm(t("restore_confirm")):
+    try:
+        with open(path, encoding="utf-8") as fh:
+            rows = len(json.load(fh))
+    except (OSError, ValueError):
+        rows = 0
+    if not _bulk_confirm(sess, rows):
         print(t("cancelled"))
         return
     rollback(sess.jf, path)
@@ -408,7 +461,7 @@ def _flow_config(sess: Session) -> None:
     for key in settings.KEYS:
         print("  %-13s: %s" % (key, data.get(key) or "(unset)"))
     mode = _choose(t("config"), [("archive", "archive"), ("archive_root", "archive_root"),
-                                 ("url", "url"), ("unset", "--unset"), ("back", t("back"))])
+                                 ("url", "url"), ("unset", "--unset"), ("back", t("back_menu"))])
     if mode == "back":
         return
     if mode == "unset":
@@ -430,9 +483,9 @@ def _flow_single(sess: Session) -> None:
     if mode == "episodes":
         _flow_episodes(sess, library=library, series_id=series_id)
     elif mode == "seasons":
-        _flow_seasons(sess)
+        _flow_seasons(sess, library=library, series_id=series_id)
     else:
-        _flow_specials(sess)
+        _flow_specials(sess, library=library, series_id=series_id)
 
 
 MENU = [
@@ -471,6 +524,11 @@ def run(args) -> int:
     if not sys.stdin.isatty() and not getattr(args, "yes", False):
         print(t("nontty"))
         return 2
+    if getattr(args, "ipv4", False):
+        force_ipv4()
+    _NONINTERACTIVE[0] = bool(getattr(args, "yes", False))
+    if _NONINTERACTIVE[0]:
+        print(t("noninteractive"))
     sess = _open(args)
     if sess is None:
         return 1

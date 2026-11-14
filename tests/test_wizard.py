@@ -221,6 +221,27 @@ class FlowTest(unittest.TestCase):
         self.assertFalse(apply.called)
         self.assertIn("cancelled", out)
 
+    def test_write_flag_flips_the_default_of_the_write_prompt(self):
+        sess = self.sess
+        sess.write_default = True
+        with mock.patch.object(wizard, "_confirm", return_value=True) as confirm:
+            self.assertTrue(sess.confirm("write?"))
+        self.assertEqual(confirm.call_args.kwargs.get("default"), True)
+
+    def test_yes_beats_write_flag(self):
+        sess = self.sess
+        sess.write_default = True
+        sess.assume_yes = True
+        self.assertFalse(sess.confirm("write?"))
+
+    def test_backup_filter_ignores_reports(self):
+        with open(os.path.join(self.tmp, "a-backup.json"), "w", encoding="utf-8") as fh:
+            fh.write('[{"item_id": "x", "new": "1"}]')
+        with open(os.path.join(self.tmp, "scan-report.json"), "w", encoding="utf-8") as fh:
+            fh.write('{"summary": {}}')
+        self.assertTrue(wizard._is_backup(os.path.join(self.tmp, "a-backup.json")))
+        self.assertFalse(wizard._is_backup(os.path.join(self.tmp, "scan-report.json")))
+
     def test_config_unset(self):
         with mock.patch.dict(os.environ, {"JBMID_CONFIG_DIR": self.tmp}):
             settings.save({"archive": "/a"})

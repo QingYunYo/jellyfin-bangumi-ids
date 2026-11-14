@@ -140,7 +140,7 @@ how to combine them on a real repair**.
 | `protect` | stop the plugin from overwriting hand-written IDs | — | plugin setting |
 | `rollback` | restore from a backup | backup JSON | writes |
 | `doctor` | connectivity / data source / plugin state | — | read-only |
-| `wizard` | interactive menu over the flows above | — | preview first |
+| `wizard` | menu: check / episodes / seasons / specials / one-shot / rollback / one series / config | — | preview first |
 | `config` | remember the archive path / server URL | — | writes config |
 
 ### 4.1 `wizard`: skip the flags
@@ -151,18 +151,22 @@ again, and the default answer is "no":
 ```bash
 jbmid wizard            # Chinese menu (default)
 jbmid wizard --lang en  # English menu
-jbmid wizard --write    # pre-answer the write prompts with yes (it still previews)
-jbmid wizard --yes      # non-interactive: take every default (which never writes)
+jbmid wizard --write    # default the write prompts to yes (it still previews, still asks)
+jbmid wizard --yes      # non-interactive: take every default, never write (smoke test only)
 ```
 
-Eight entries: check, fix episode ids, fix season ids, fix specials, one-shot, rollback, one
-series/library, config. On start it resolves the server URL and the offline archive (chapter 6); when no
-archive is found it prints the paths it tried and why, then offers to type a path, give the host mount
-point, or go online.
+Eight entries: check, fix episode ids, fix season ids, fix specials, one-shot, rollback, one series,
+config. On start it resolves the server URL (`--url` -> `JF_URL` -> `config` -> default) and the
+offline archive (chapter 6); when no archive is found it prints the paths it tried and why, then offers
+to type a path, give the host mount point, or go online.
 
-Each write ends with three lines: the backup file, the `jbmid rollback <backup>` command, and the
-equivalent non-interactive command you can paste into cron. Non-interactive shells (pipes, CI) are
-refused unless you pass `--yes`.
+Above 50 changes a single `y` is not enough: you have to type the count back. Restoring a backup goes
+through the same threshold. Each write ends with three lines: the backup file, the
+`jbmid rollback <backup>` command, and the equivalent non-interactive command you can paste into cron.
+Non-interactive shells (pipes, CI) are refused with exit code 2 unless you pass `--yes`.
+
+Exit codes: `0` finished, `1` cannot reach Jellyfin, `2` no terminal and no `--yes`, `130` Ctrl-C or
+end of input.
 
 ### 4.2 `scan`: look before you leap
 
@@ -498,14 +502,15 @@ movies.
 ## 10. Development
 
 ```bash
-PYTHONPATH=src python -m unittest discover -s tests   # 143 cases, fully offline (if not pip install -e .)
+PYTHONPATH=src python -m unittest discover -s tests   # 170 cases, fully offline (if not pip install -e .)
 ```
 
 CI runs the same suite on Python 3.8 / 3.10 / 3.12. Layout:
 
 ```text
 src/jellyfin_bangumi_ids/
-  cli.py       command line (scan/apply/season/auto/special/anchor/verify/sync/rollback/protect/doctor)
+  cli.py       command line (scan/apply/season/auto/special/anchor/verify/sync/rollback/protect/doctor/config/wizard)
+  wizard.py    interactive menu (eight entries, preview before write, bulk threshold)
   jellyfin.py  Jellyfin client (retries, ProviderIds read-modify-write)
   bangumi.py   Bangumi API v0 client
   offline.py   offline archive backend (read-only, falls back online)
