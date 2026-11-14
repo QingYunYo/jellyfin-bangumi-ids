@@ -300,7 +300,8 @@ jbmid sync --series-id 9a63c5f950cf05e5ba3796722a403f27   # 只处理一部
 
 只有 `scan` 判 `ok` 的集才会被写；某一步报错就停在那一步，不会带着半成品继续。`--stop-on-review`
 让 `scan` 一遇 `review` 就收工；`--fail-on season-ids,dup` 把最后的体检结论变成退出码，适合塞进
-cron / CI。`--backup-dir` 与 `--out-dir` 决定备份和中间报告放哪。
+cron / CI。`--backup-dir` 与 `--out-dir` 决定备份和中间报告放哪；同名备份已存在时会自动加时间戳
+轮换，不会覆盖上一次的还原点，结束时打印全部备份路径。
 
 ### 4.11 综合用法：真实修复时的顺序
 
