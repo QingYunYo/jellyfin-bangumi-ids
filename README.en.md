@@ -500,8 +500,13 @@ Environment variables:
 | `JBMID_ARCHIVE_SEARCH` | non-empty enables the bounded walk (`0`/`off` disables) | `--search-archive` |
 | `JBMID_CACHE` | SQLite index cache directory | none |
 | `JBMID_CONFIG_DIR` | config file directory | none |
+| `JBMID_LANG` | menu and message language (`zh` / `en`) | `--lang` |
 
 The server URL is resolved as `--url` → `JF_URL` → `jbmid config --url` → `http://127.0.0.1:8096`.
+
+The language follows your locale: `LC_ALL`/`LC_MESSAGES`/`LANG` starting with `zh` gives Chinese,
+any other valid locale gives English, and `C`/`POSIX`/unset means Chinese. Force it with
+`JBMID_LANG=zh|en` or the wizard's `--lang`. Subcommand reports and error messages follow the same rule.
 
 The SQLite index lives in `~/.cache/jellyfin-bangumi-ids/` (`JBMID_CACHE` overrides it), about 150 MB, and
 the source files stay read-only. The archive is maintained by the plugin's "update offline database" task (roughly every two weeks); when it is stale the live API wins.
@@ -559,7 +564,14 @@ series are skipped by season alignment.
 `pip install` was most likely blocked by PEP 668. Use `./jbmid` from the checkout, or
 `python3 -m venv .venv && . .venv/bin/activate && pip install -e .` so `jbmid` lands on PATH.
 
-**Q12. Can the wizard run from cron?**
+**Q12. Will the menus speak English on my English system?**
+Yes. Menus, prompts and error messages follow `LANG`: `zh*` → Chinese, any other valid locale →
+English, `C`/`POSIX`/unset → Chinese. Force it with `JBMID_LANG=zh|en` or `jbmid wizard --lang en`.
+Matching itself is unaffected: Bangumi episode titles are Japanese/Chinese, so English-language live
+action usually matches per episode while English fansubs of anime rely more on "same episode count →
+ordered mapping".
+
+**Q13. Can the wizard run from cron?**
 No. Without a terminal it refuses and exits 2 — use the subcommands (e.g. `jbmid sync --library Anime`),
 or `jbmid wizard --yes` (all defaults, never writes, smoke tests only).
 

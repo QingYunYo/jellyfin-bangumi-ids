@@ -180,6 +180,39 @@ def t(key: str) -> str:
     return pair[0] if _LANG[0] == "zh" else pair[1]
 
 
+def detect_lang() -> str:
+    """Menu language when the user did not pass --lang.
+
+    JBMID_LANG wins, then the usual POSIX locale variables. A locale we cannot read
+    (C, POSIX, empty) means "not set", not "English", so an unconfigured box keeps Chinese.
+    """
+    forced = (os.environ.get("JBMID_LANG") or "").strip().lower()
+    if forced.startswith("zh"):
+        return "zh"
+    if forced.startswith("en"):
+        return "en"
+    for name in ("LC_ALL", "LC_MESSAGES", "LANG", "LANGUAGE"):
+        value = (os.environ.get(name) or "").strip().lower()
+        if not value or value in ("c", "posix", "c.utf-8", "c.utf8"):
+            continue
+        return "en" if not value.startswith("zh") else "zh"
+    return "zh"
+
+
+def set_lang(value: Optional[str]) -> str:
+    """Apply an explicit --lang, else fall back to detect_lang()."""
+    if value:
+        lang = "en" if value.lower().startswith("en") else "zh"
+    else:
+        lang = detect_lang()
+    _LANG[0] = lang
+    return lang
+
+
+def language() -> str:
+    return _LANG[0]
+
+
 _LANG = ["zh"]
 _NONINTERACTIVE = [False]
 
@@ -979,6 +1012,7 @@ def sess_args(sess: Session) -> _Args:
 
 
 def setup(args) -> int:
+    set_lang(getattr(args, "lang", None))
     """``jbmid setup``: ask the three questions again, even if configured."""
     try:
         sess = _open(args, force_setup=True)
@@ -991,6 +1025,7 @@ def setup(args) -> int:
 
 
 def config_flow(args) -> int:
+    set_lang(getattr(args, "lang", None))
     """``jbmid config`` with no flags in a terminal: the editor, then exit."""
     try:
         sess = _open(args)
@@ -1046,8 +1081,7 @@ def _menu() -> None:
 
 
 def run(args) -> int:
-    if getattr(args, "lang", None):
-        _LANG[0] = "en" if args.lang.startswith("en") else "zh"
+    set_lang(getattr(args, "lang", None))
     if not sys.stdin.isatty() and not getattr(args, "yes", False):
         print(t("nontty"))
         return 2

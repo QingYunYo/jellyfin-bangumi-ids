@@ -20,7 +20,10 @@ from .season import load_mapping, scan_seasons
 from .sync import run_sync
 from .transport import HttpError, NetError, force_ipv4, set_verbose
 from .verify import fail_on_breaches, run_verify, run_verify_offline
-from .wizard import config_flow as config_wizard, run as run_wizard, setup as run_setup
+from .wizard import language, set_lang
+from .wizard import config_flow as config_wizard
+from .wizard import run as run_wizard
+from .wizard import setup as run_setup
 
 DEFAULT_URL = "http://127.0.0.1:8096"
 
@@ -551,42 +554,62 @@ def build_parser() -> argparse.ArgumentParser:
     common(p)
     p.add_argument("--no-save-key", action="store_true",
                    help="ask for the key every run; keep it out of the config file")
+    p.add_argument("--lang", choices=["zh", "en"], default=None, help="menu language")
     p.set_defaults(func=cmd_setup)
     return parser
 
 
+_EXPLAIN = {
+    "zh": {
+        "key": "错误：Jellyfin API Key 被拒绝（401）。到 控制台 → API 密钥 新建一个，"
+               "用 --api-key 或 JF_API_KEY 传入。",
+        "url404": "错误：%s 返回 404。检查地址（不要带 /web）和端口。",
+        "net": "错误：连不上 %s\n       检查 --url 与容器端口；主机 IPv6 有问题时加 --ipv4",
+        "nofile": "错误：%s 不存在——先 scan，再 apply 它的报告",
+        "os": "错误：%s",
+        "other": "错误：%s",
+    },
+    "en": {
+        "key": "error: the Jellyfin API key was rejected (401). Create a new one under "
+               "Dashboard -> API Keys and pass it as --api-key or JF_API_KEY.",
+        "url404": "error: %s answered 404. Check the base URL (no /web suffix) and the port.",
+        "net": "error: cannot reach %s\n       check --url and the container port; "
+               "on hosts with broken IPv6 add --ipv4",
+        "nofile": "error: %s does not exist -- scan first, then apply its report",
+        "os": "error: %s",
+        "other": "error: %s",
+    },
+}
+
+
 def _explain(exc: Exception) -> None:
     """One actionable line per class of failure; the traceback needs -v."""
+    words = _EXPLAIN["en" if language() == "en" else "zh"]
     text = str(exc)
     if isinstance(exc, HttpError):
         if exc.status == 401:
-            print("error: the Jellyfin API key was rejected (401). Create a new one under "
-                  "Dashboard -> API Keys and pass it as --api-key or JF_API_KEY.",
-                  file=sys.stderr)
+            print(words["key"], file=sys.stderr)
         elif exc.status == 404 and "/System/Info" in text:
-            print("error: %s answered 404. Check the base URL (no /web suffix) and the port."
-                  % text.split(" for ")[-1].split(":")[0], file=sys.stderr)
+            print(words["url404"] % text.split(" for ")[-1].split(":")[0], file=sys.stderr)
         else:
-            print("error: %s" % text, file=sys.stderr)
+            print(words["other"] % text, file=sys.stderr)
         return
     if isinstance(exc, NetError):
-        print("error: cannot reach %s" % text, file=sys.stderr)
-        print("       check --url and the container port; on hosts with broken IPv6 add --ipv4",
-              file=sys.stderr)
+        print(words["net"] % text, file=sys.stderr)
         return
     if isinstance(exc, FileNotFoundError):
-        print("error: %s does not exist -- scan first, then apply its report" % exc.filename,
-              file=sys.stderr)
+        print(words["nofile"] % exc.filename, file=sys.stderr)
         return
     if isinstance(exc, OSError):
-        print("error: %s" % exc, file=sys.stderr)
+        print(words["os"] % exc, file=sys.stderr)
         return
-    print("error: %s" % text, file=sys.stderr)
+    print(words["other"] % text, file=sys.stderr)
 
 
 def main(argv: Optional[List[str]] = None) -> int:
     parser = build_parser()
     raw = sys.argv[1:] if argv is None else list(argv)
+    set_lang(None)  # JBMID_LANG / LANG; the wizard can still override with --lang
     if not raw:
         if sys.stdin.isatty():
             # First contact: the wizard asks for URL/key once, then shows the menu.

@@ -503,3 +503,51 @@ class InputRulesTest(unittest.TestCase):
                 redirect_stdout(io.StringIO()) as out:
             self.assertFalse(wizard.save_settings({"url": "http://x"}))
         self.assertIn("没保存", out.getvalue())
+
+
+class LanguageTest(unittest.TestCase):
+    """Menu language: --lang wins, then JBMID_LANG, then the POSIX locale."""
+
+    def setUp(self):
+        self.saved = dict(os.environ)
+        for name in ("JBMID_LANG", "LC_ALL", "LC_MESSAGES", "LANG", "LANGUAGE"):
+            os.environ.pop(name, None)
+        wizard._LANG[0] = "zh"
+
+    def tearDown(self):
+        os.environ.clear()
+        os.environ.update(self.saved)
+        wizard._LANG[0] = "zh"
+
+    def test_unset_locale_stays_chinese(self):
+        self.assertEqual(wizard.detect_lang(), "zh")
+
+    def test_english_locale_switches(self):
+        os.environ["LANG"] = "en_US.UTF-8"
+        self.assertEqual(wizard.detect_lang(), "en")
+
+    def test_chinese_locale_stays(self):
+        os.environ["LANG"] = "zh_CN.UTF-8"
+        self.assertEqual(wizard.detect_lang(), "zh")
+
+    def test_c_locale_is_not_english(self):
+        os.environ["LANG"] = "C"
+        self.assertEqual(wizard.detect_lang(), "zh")
+
+    def test_jbmid_lang_wins_over_lang(self):
+        os.environ["LANG"] = "en_US.UTF-8"
+        os.environ["JBMID_LANG"] = "zh"
+        self.assertEqual(wizard.detect_lang(), "zh")
+
+    def test_explicit_lang_overrides_environment(self):
+        os.environ["LANG"] = "en_US.UTF-8"
+        wizard.set_lang("zh")
+        self.assertEqual(wizard.language(), "zh")
+        wizard.set_lang("en")
+        self.assertEqual(wizard.language(), "en")
+
+    def test_menu_label_follows_language(self):
+        wizard.set_lang("en")
+        self.assertEqual(wizard.t("retry"), "Try again?")
+        wizard.set_lang("zh")
+        self.assertEqual(wizard.t("retry"), "重试？")

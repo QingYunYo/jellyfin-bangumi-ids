@@ -467,8 +467,13 @@ jbmid config --unset archive               # 删掉某一项
 | `JBMID_ARCHIVE_SEARCH` | 非空即开启有界搜索（`0`/`off` 关闭） | `--search-archive` |
 | `JBMID_CACHE` | SQLite 索引缓存目录 | 无 |
 | `JBMID_CONFIG_DIR` | 配置文件目录 | 无 |
+| `JBMID_LANG` | 菜单与提示语言（`zh` / `en`） | `--lang` |
 
 服务器地址的取值顺序：`--url` → `JF_URL` → `jbmid config --url` → 默认 `http://127.0.0.1:8096`。
+
+语言默认跟随系统 locale：`LC_ALL`/`LC_MESSAGES`/`LANG` 是 `zh*` 就中文，是其它有效 locale 就英文，
+`C`/`POSIX`/未设置时按中文处理；`JBMID_LANG=zh|en` 或向导的 `--lang` 可强制指定。
+子命令（scan/verify/apply…）的报告与错误信息同样跟随这个判断。
 
 索引缓存放在 `~/.cache/jellyfin-bangumi-ids/`（`JBMID_CACHE` 可改），约 150 MB，只读源文件；
 档案由插件的「离线数据库更新」任务维护（约两周一次，以插件为准），过期时以在线 API 为准。档案里没有的条目（新集、关系图、按标题搜索）
@@ -521,7 +526,12 @@ jbmid config --unset archive               # 删掉某一项
 `pip install` 多半被系统的 PEP 668 拦了。直接用仓库里的 `./jbmid`，或建虚拟环境：
 `python3 -m venv .venv && . .venv/bin/activate && pip install -e .`，之后 `jbmid` 就在 PATH 里。
 
-**Q12. 向导能放进 cron 吗**
+**Q12. 我的系统是英文的，菜单会是英文吗**
+会。菜单、提示和错误信息跟随 `LANG`：`zh*` → 中文，其它有效 locale → 英文，`C`/`POSIX`/未设置 → 中文。
+想强制指定用 `JBMID_LANG=zh|en` 或 `jbmid wizard --lang en`。数据本身不受影响——Bangumi 的集名是日文/中文，
+英文原声剧通常能逐条命中，日漫的英文字幕名则更多依赖「集数相等 → 顺序映射」。
+
+**Q13. 向导能放进 cron 吗**
 不建议。cron 没有终端，向导会直接拒绝并返回 2；用子命令（如 `jbmid sync --library 动漫`），
 或 `jbmid wizard --yes`（全取默认、不会写库，只适合冒烟）。
 
