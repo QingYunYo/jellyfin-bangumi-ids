@@ -8,6 +8,9 @@ Fill in the correct `ProviderIds.Bangumi` on every episode **and every season** 
 Bangumi plugin reports progress against the right subject. It changes that one field — never your
 video files, never other metadata.
 
+**Just want to see it work?** Run `jbmid wizard` (`./jbmid wizard` from a checkout) and pick
+"1 check" — read-only.
+
 ## Contents
 
 - [1. Two kinds of ID](#1-two-kinds-of-id)
@@ -15,7 +18,7 @@ video files, never other metadata.
 - [3. Quick start](#3-quick-start)
 - [4. Modes and usage](#4-modes-and-usage)
 - [5. Season IDs: why they have to be fixed too](#5-season-ids-why-they-have-to-be-fixed-too)
-- [6. Speeding up with the offline archive](#6-speeding-up-with-the-offline-archive)
+- [6. Data sources and configuration: archive, Docker, config](#6-data-sources-and-configuration-archive-docker-config)
 - [7. Safety](#7-safety)
 - [8. FAQ](#8-faq)
 - [9. How it works](#9-how-it-works)
@@ -111,18 +114,27 @@ jbmid doctor          # connectivity, data source, plugin state
 
 ## 3. Quick start
 
+Two ways in. Pick the one that matches how you like to work.
+
+### 3.1 Don't want to memorise flags: the wizard
+
 ```bash
-# 1) scan the library, write a report only (add --limit 3 to try it out)
-jbmid scan --library Anime --out report.json
+./jbmid wizard        # `jbmid` if installed, `./jbmid` inside a checkout
+```
 
-# 2) dry run first
-jbmid apply report.json --dry-run
+The menu has eight entries: check, episode ids, season ids, specials, one-shot, rollback, one series,
+config. On the first run walk 1 → 2 → 3, and use 6 if something looks off. Every write flow previews first
+and asks once more: **the bracketed value is what Enter gives you, and `0` always means back / cancel**.
+When a flow finishes it prints the backup file, the rollback command and the equivalent non-interactive
+command, so you can paste the last one into a script. For cron, skip the wizard and use 3.2.
 
-# 3) apply for real (old values are backed up)
-jbmid apply report.json --backup jbmid-backup.json
+### 3.2 Want exact control: the subcommands
 
-# 4) undo everything if needed
-jbmid rollback jbmid-backup.json
+```bash
+jbmid scan --library Anime --limit 3 --out report.json  # report only; --library ignores case, omit for all
+jbmid apply report.json --dry-run                       # dry run first
+jbmid apply report.json --backup jbmid-backup.json      # write for real, old values are backed up
+jbmid rollback jbmid-backup.json                        # undo everything if needed
 ```
 
 ```text
@@ -140,27 +152,30 @@ Three numbers: `series ok` aligned, `series review` uncertain (**not written**, 
 `episodes to write` how many episodes change. Each series in the report carries `anchor` / `chain` /
 `notes`; reviews explain themselves (e.g. `size mismatch 25 local vs 51 pool`).
 
+If more than a couple of series land in `review`, pick a mode in chapter 4; if the IDs are written but the
+plugin still complains, read chapter 5 (season ids).
+
 ## 4. Modes and usage
 
-One table first. The only hard rule for picking a mode is **whether it writes** — when in doubt, add
-`--dry-run`. Individual modes are 4.1–4.10; **[4.11](#411-putting-it-together-the-order-that-actually-works) is
-how to combine them on a real repair**.
+The only hard rule for picking a mode is **whether it writes** — when in doubt, add `--dry-run`. The table
+below is grouped by how much it touches; individual modes are 4.1–4.10, and
+**[4.11](#411-putting-it-together-the-order-that-actually-works) is how to combine them on a real repair**.
 
-| Mode | What it does | Input | Writes? |
+| Group | Mode | What it does | Writes? |
 | --- | --- | --- | --- |
-| `scan` | find anchors, align the whole library by episode title | `--library` | report only |
-| `apply` | write a `scan` / `special` report into Jellyfin | report JSON | writes (`--dry-run`) |
-| `season` | declare "season N = these subjects" by hand | `--map` JSON | writes (`--dry-run`) |
-| `auto` | find subjects by title + align by episode name, one shot | `--library` | writes (`--dry-run`) |
-| `special` | fix Season 0 / specials / OVA | `--library` | report only |
-| `sync` | one run: scan → apply → season ids → specials → verify | `--library` | writes (`--dry-run`) |
-| `anchor` | repair a show's series-level / season-level ID | `--series` or `--library` | writes (`--dry-run`) |
-| `verify` | audit episode and season IDs | `--library` | read-only |
-| `protect` | stop the plugin from overwriting hand-written IDs | — | plugin setting |
-| `rollback` | restore from a backup | backup JSON | writes |
-| `doctor` | connectivity / data source / plugin state | — | read-only |
-| `wizard` | menu: check / episodes / seasons / specials / one-shot / rollback / one series / config | — | preview first |
-| `config` | remember the archive path / server URL | — | writes config |
+| entry | `wizard` | menu: check / episodes / seasons / specials / one-shot / rollback / one series / config | preview first |
+| read-only | `doctor` | connectivity / data source / plugin state | read-only |
+| read-only | `verify` | audit episode and season IDs | read-only |
+| report only | `scan` | find anchors, align the whole library by episode title | report only |
+| report only | `special` | fix Season 0 / specials / OVA | report only |
+| write | `apply` | write a `scan` / `special` report into Jellyfin | writes (`--dry-run`) |
+| write | `season` | declare "season N = these subjects" by hand | writes (`--dry-run`) |
+| write | `auto` | find subjects by title + align by episode name, one shot | writes (`--dry-run`) |
+| write | `anchor` | repair a show's series-level / season-level ID | writes (`--dry-run`) |
+| write | `sync` | one run: scan → apply → season ids → specials → verify | writes (`--dry-run`) |
+| undo | `rollback` | restore from a backup | writes |
+| config | `protect` | stop the plugin from overwriting hand-written IDs | plugin setting |
+| config | `config` | remember the archive path / server URL | writes config |
 
 ### 4.1 `wizard`: skip the flags
 
@@ -300,12 +315,15 @@ jbmid verify --library Anime --fail-on season-ids,dup # exit 1 on a hit (cron / 
 Field meanings are in [chapter 5](#5-season-ids-why-they-have-to-be-fixed-too); `--fail-on` accepts
 `unknown dup low-sim disorder foreign anchors season-ids season-spans none`.
 
-### 4.9 `protect` / `doctor` / `config`
+### 4.9 `protect` / `doctor`
 
 ```bash
 jbmid protect     # sets TrustExistedBangumiId = True so refreshes stop overwriting
 jbmid doctor      # connectivity / data source / plugin state
 ```
+
+`jbmid config` (remember the paths) is at the end of
+[chapter 6](#6-data-sources-and-configuration-archive-docker-config).
 
 Every sample output in both READMEs comes from [`examples/`](examples/README.md) (real reports and backups, trimmed, with field notes).
 
@@ -405,7 +423,7 @@ Writes are read-modify-write: GET the full item → change only `ProviderIds.Ban
 check neighbouring fields were not dragged along; every change is also recorded in a backup that `rollback`
 can restore. Season rows carry `"kind": "season"`.
 
-## 6. Speeding up with the offline archive
+## 6. Data sources and configuration: archive, Docker, config
 
 After installing the Bangumi plugin and running its "update offline database" task,
 `{Jellyfin DataPath}/bangumi/archive/` holds a few `.jsonlines` files. This tool reads them directly,
@@ -443,10 +461,20 @@ records the attempt and keeps looking instead of silently running online for 40 
 prints every path it tried and why it failed (`missing` / `unreadable`) — fix it with one
 `jbmid config --archive DIR`.
 
-`jbmid config` stores `archive` / `archive_root` / `url` in
-`~/.config/jellyfin-bangumi-ids/config.json` (`%APPDATA%` on Windows, override with `JBMID_CONFIG_DIR`),
-mode 0600, and **never the API key** (that is `--api-key` / `JF_API_KEY` only). Use
-`jbmid config --unset archive` to drop one value; `jbmid config` alone just prints them.
+### 6.1 Remember the paths: `jbmid config`
+
+```bash
+jbmid config --archive DIR            # archive directory
+jbmid config --archive-root DIR       # host directory that holds Jellyfin's data mount
+jbmid config --url http://127.0.0.1:8096
+jbmid config                          # just print the current values
+jbmid config --unset archive          # drop one value
+```
+
+Stored in `~/.config/jellyfin-bangumi-ids/config.json` (`%APPDATA%` on Windows, override with
+`JBMID_CONFIG_DIR`), mode 0600, and **never the API key** (that is `--api-key` / `JF_API_KEY` only). A
+corrupt file is reported and renamed to `.bad` so the next save cannot overwrite it. Server URL order:
+`--url` → `JF_URL` → `config` → default.
 
 Environment variables:
 
@@ -513,6 +541,14 @@ No. Exact → case-insensitive → unique substring; if all fail, the available 
 **Q10. Movies / theatrical releases?**
 Episodes only. Movies have no episode concept and are out of scope; single-episode theatricals inside a
 series are skipped by season alignment.
+
+**Q11. It says `jbmid: command not found`**
+`pip install` was most likely blocked by PEP 668. Use `./jbmid` from the checkout, or
+`python3 -m venv .venv && . .venv/bin/activate && pip install -e .` so `jbmid` lands on PATH.
+
+**Q12. Can the wizard run from cron?**
+No. Without a terminal it refuses and exits 2 — use the subcommands (e.g. `jbmid sync --library Anime`),
+or `jbmid wizard --yes` (all defaults, never writes, smoke tests only).
 
 ## 9. How it works
 

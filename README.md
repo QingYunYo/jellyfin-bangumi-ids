@@ -7,6 +7,8 @@
 把 Jellyfin 里每一集、每一季的 `ProviderIds.Bangumi` 填对，让 Bangumi 插件的进度同步落到正确的作品上。
 只改这一个字段，不动视频文件，不动其他元数据。
 
+**只想先看效果**：跑 `jbmid wizard`（没安装就用 `./jbmid wizard`），选「1 体检」——只看不写。
+
 ## 目录
 
 - [1. 它改什么：两类 ID](#1-它改什么两类-id)
@@ -14,7 +16,7 @@
 - [3. 快速开始](#3-快速开始)
 - [4. 模式与用法](#4-模式与用法)
 - [5. 季级 ID：为什么必须一起修](#5-季级-id为什么必须一起修)
-- [6. 用离线档案提速](#6-用离线档案提速)
+- [6. 数据源与配置：离线档案、Docker、config](#6-数据源与配置离线档案dockerconfig)
 - [7. 安全性](#7-安全性)
 - [8. 常见问题](#8-常见问题)
 - [9. 实现](#9-实现)
@@ -104,18 +106,38 @@ jbmid doctor          # 连通性 + 数据源 + 插件状态
 
 ## 3. 快速开始
 
+第一次用，按习惯选一条。
+
+### 3.1 不想背参数：用向导
+
 ```bash
-# 1) 扫库，只生成报告，不写任何东西（--limit 3 先试水）
-jbmid scan --library 动漫 --out report.json
+./jbmid wizard        # 装过就是 jbmid，没装就是仓库里的 ./jbmid
+```
 
-# 2) 先干跑，看要写多少集
-jbmid apply report.json --dry-run
+菜单八项，第一次建议按「1 体检 → 2 修集级 → 3 修季级」走一遍，出问题用「6 回滚」：
 
-# 3) 真写（旧值自动备份）
-jbmid apply report.json --backup jbmid-backup.json
+```text
+  1  体检（verify + 报告）
+  2  修集级 ID（scan → apply）
+  3  修季级 ID（anchor --seasons）
+  4  修番外 ID（special → apply）
+  5  一条龙（sync）
+  6  回滚（从备份还原）
+  7  单剧（按剧修）
+  8  配置（config）
+  0  退出
+```
 
-# 4) 出问题一键回滚
-jbmid rollback jbmid-backup.json
+每个写操作都先给预览、再问一次：**方括号里是回车默认值，`0` 永远是返回/取消**。改完会打印备份文件、
+还原命令和等价的子命令，方便抄进脚本。要进 cron 就别用向导，直接用 3.2 的子命令。
+
+### 3.2 要精确控制：子命令
+
+```bash
+jbmid scan --library 动漫 --limit 3 --out report.json   # 只出报告；--library 不分大小写，省略=全部库
+jbmid apply report.json --dry-run                       # 先干跑
+jbmid apply report.json --backup jbmid-backup.json      # 真写，旧值自动备份
+jbmid rollback jbmid-backup.json                        # 出问题一键还原
 ```
 
 ```text
@@ -132,26 +154,28 @@ episodes       : 0 to write
 三个数字：`series ok` 可以对齐、`series review` 不确定（**不写**，看 `reason`）、`episodes to write` 要改的集数。
 报告里每部剧带 `anchor` / `chain` / `notes`，`review` 的会写明原因（如 `size mismatch 25 local vs 51 pool`）。
 
+`review` 超过一两部时先看第 4 章选模式；ID 写完了插件还报错，看第 5 章（季级）。
+
 ## 4. 模式与用法
 
-先看一张表。选模式的唯一硬标准是**写不写**——拿不准就加 `--dry-run`。单个模式的用法见 4.1–4.10，
-**真实修复时几个模式怎么排顺序见 [4.11](#411-综合用法真实修复时的顺序)**。
+选模式的唯一硬标准是**写不写**——拿不准就加 `--dry-run`。下表按「动不动你的库」分组；
+单个模式的细节见 4.1–4.10，**真实修复时怎么排序见 [4.11](#411-综合用法真实修复时的顺序)**。
 
-| 模式 | 干什么 | 输入 | 写不写 |
+| 分组 | 模式 | 干什么 | 写不写 |
 | --- | --- | --- | --- |
-| `scan` | 自动找锚点、按集名对齐整库 | `--library` | 只出报告 |
-| `apply` | 把 `scan` / `special` 的报告写进 Jellyfin | 报告 JSON | 写（有 `--dry-run`） |
-| `season` | 手工指定「第几季 = 哪几个 subject」 | `--map` JSON | 写（有 `--dry-run`） |
-| `auto` | 按标题找条目 + 按集名对齐，一把梭 | `--library` | 写（有 `--dry-run`） |
-| `special` | 修 Season 0 / 番外 / OVA | `--library` | 只出报告 |
-| `sync` | 一条龙：scan → apply → 季级 → 番外 → verify | `--library` | 写（有 `--dry-run`） |
-| `anchor` | 修某部剧的剧集级 / 季级 ID | `--series` 或 `--library` | 写（有 `--dry-run`） |
-| `verify` | 体检：集级、季级 ID 对不对 | `--library` | 只读 |
-| `protect` | 让插件别覆盖手写 ID | — | 改插件配置 |
-| `rollback` | 按备份还原 | 备份 JSON | 写 |
-| `doctor` | 连通性 / 数据源 / 插件状态 | — | 只读 |
-| `wizard` | 向导：体检 / 集级 / 季级 / 番外 / 一条龙 / 回滚 / 单剧 / 配置 | — | 默认只预览 |
-| `config` | 记住档案路径 / 服务器地址 | — | 写配置文件 |
+| 入口 | `wizard` | 八项菜单：体检 / 集级 / 季级 / 番外 / 一条龙 / 回滚 / 单剧 / 配置 | 默认只预览 |
+| 只读 | `doctor` | 连通性 / 数据源 / 插件状态 | 只读 |
+| 只读 | `verify` | 体检：集级、季级 ID 对不对 | 只读 |
+| 只出报告 | `scan` | 自动找锚点、按集名对齐整库 | 只出报告 |
+| 只出报告 | `special` | 修 Season 0 / 番外 / OVA | 只出报告 |
+| 写库 | `apply` | 把 `scan` / `special` 的报告写进 Jellyfin | 写（有 `--dry-run`） |
+| 写库 | `season` | 手工指定「第几季 = 哪几个 subject」 | 写（有 `--dry-run`） |
+| 写库 | `auto` | 按标题找条目 + 按集名对齐，一把梭 | 写（有 `--dry-run`） |
+| 写库 | `anchor` | 修某部剧的剧集级 / 季级 ID | 写（有 `--dry-run`） |
+| 写库 | `sync` | 一条龙：scan → apply → 季级 → 番外 → verify | 写（有 `--dry-run`） |
+| 回退 | `rollback` | 按备份还原 | 写 |
+| 配置 | `protect` | 让插件别覆盖手写 ID | 改插件配置 |
+| 配置 | `config` | 记住档案路径 / 服务器地址 | 写配置文件 |
 
 ### 4.1 `wizard`：不想背参数就用它
 
@@ -279,12 +303,14 @@ jbmid verify --library 动漫 --fail-on season-ids,dup     # 有命中就 exit 1
 各字段含义见[第 5 章](#5-季级-id为什么必须一起修)；`--fail-on` 可选 `unknown dup low-sim
 disorder foreign anchors season-ids season-spans none`。
 
-### 4.9 `protect` / `doctor` / `config`
+### 4.9 `protect` / `doctor`
 
 ```bash
 jbmid protect     # 把 TrustExistedBangumiId 设为 True，刷新不再覆盖
 jbmid doctor      # 连通性 / 数据源 / 插件状态
 ```
+
+`jbmid config`（记住路径）在[第 6 章](#6-数据源与配置离线档案dockerconfig)末尾。
 
 两份 README 里的示例输出都来自 [`examples/`](examples/README.md)（真实报告与备份的节选，附字段说明）。
 
@@ -377,7 +403,7 @@ ID 反查条目」，两边都对——第 1 章那段日志对照就是这个�
 写回走读-改-写：GET 完整条目 → 只改 `ProviderIds.Bangumi` → POST → 回读确认，并检查相邻字段有没有
 被连带改掉；改了什么同时写进备份，`rollback` 可还原。季级备份里 `kind` 字段是 `season`。
 
-## 6. 用离线档案提速
+## 6. 数据源与配置：离线档案、Docker、config
 
 装了 Bangumi 插件并跑过「离线数据库更新」后，`{DataPath}/bangumi/archive/` 下有几份
 `.jsonlines`。本工具直接读它们，把在线请求换成主键查询：
@@ -412,10 +438,21 @@ jbmid doctor
 而不是静默退回在线、让你等 40 分钟。`jbmid doctor` 会打印每一条尝试过的路径和失败原因
 （`missing` / `unreadable`），照着补一条 `jbmid config --archive DIR` 即可。
 
-`jbmid config` 把 `archive` / `archive_root` / `url` 存到
-`~/.config/jellyfin-bangumi-ids/config.json`（Windows 为 `%APPDATA%`，`JBMID_CONFIG_DIR` 可改），
-权限 0600，**不存 API Key**（API Key 只认 `--api-key` / `JF_API_KEY`）。
-`jbmid config --unset archive` 可删掉某一项，`jbmid config` 不带参数时只显示当前值。
+### 6.1 记住路径：`jbmid config`
+
+不用每次敲参数：
+
+```bash
+jbmid config --archive DIR            # 档案目录
+jbmid config --archive-root DIR       # 宿主机上 Jellyfin 的 data 挂载点
+jbmid config --url http://127.0.0.1:8096
+jbmid config                          # 只显示当前值
+jbmid config --unset archive          # 删掉某一项
+```
+
+存在 `~/.config/jellyfin-bangumi-ids/config.json`（Windows 为 `%APPDATA%`，`JBMID_CONFIG_DIR` 可改），
+权限 0600，**不存 API Key**（只认 `--api-key` / `JF_API_KEY`）。文件坏了会打一行原因、把原件改名 `.bad`，
+下次保存不覆盖它。服务器地址的优先级：`--url` → `JF_URL` → `config` → 默认值。
 
 常用环境变量：
 
@@ -477,6 +514,14 @@ jbmid doctor
 
 **Q10. 支持电影 / 剧场版吗**
 只针对剧集。电影没有集的概念，不在范围内；条目里夹着的单集剧场版会被季级对齐跳过。
+
+**Q11. 提示 `jbmid: command not found`**
+`pip install` 多半被系统的 PEP 668 拦了。直接用仓库里的 `./jbmid`，或建虚拟环境：
+`python3 -m venv .venv && . .venv/bin/activate && pip install -e .`，之后 `jbmid` 就在 PATH 里。
+
+**Q12. 向导能放进 cron 吗**
+不建议。cron 没有终端，向导会直接拒绝并返回 2；用子命令（如 `jbmid sync --library 动漫`），
+或 `jbmid wizard --yes`（全取默认、不会写库，只适合冒烟）。
 
 ## 9. 实现
 
