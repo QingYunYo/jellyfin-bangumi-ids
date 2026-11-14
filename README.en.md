@@ -179,13 +179,19 @@ config. On start it resolves the server URL (`--url` -> `JF_URL` -> `config` -> 
 offline archive (chapter 6); when no archive is found it prints the paths it tried and why, then offers
 to type a path, give the host mount point, or go online.
 
-Above 50 changes a single `y` is not enough: you have to type the count back. Restoring a backup goes
+The specials flow also asks whether to clear specials that borrow a main-episode id (default `N`,
+same as `--clear-borrowed`); reports go to `_local/backups/`, and after a write it asks whether to
+refresh those items (default `N`, same as `--refresh`). Above 50 changes a single `y` is not enough: you have to type the count back. Restoring a backup goes
 through the same threshold. Each write ends with three lines: the backup file, the
 `jbmid rollback <backup>` command, and the equivalent non-interactive command you can paste into cron.
 Non-interactive shells (pipes, CI) are refused with exit code 2 unless you pass `--yes`.
 
-Exit codes: `0` finished, `1` cannot reach Jellyfin, `2` no terminal and no `--yes`, `130` Ctrl-C or
-end of input.
+Interface rule: **the bracket spells out what Enter picks**, and `0` always means "back / exit /
+cancel" — Enter never performs a write on your behalf. In a submenu `0` returns to the main menu (it
+does not quit), and a finished flow drops you straight back into the menu.
+
+Exit codes: `0` finished, `1` cannot reach Jellyfin, `2` no terminal and no `--yes`, `3` input ended
+(a script that closed stdin), `130` Ctrl-C.
 
 ### 4.2 `scan`: look before you leap
 

@@ -53,11 +53,30 @@ class InputTest(unittest.TestCase):
             with mock.patch("builtins.input", return_value=answer):
                 self.assertTrue(wizard._confirm("write?"))
 
-    def test_eof_exits_130(self):
+    def test_eof_has_its_own_exit_code(self):
         with mock.patch("builtins.input", side_effect=EOFError):
             with self.assertRaises(SystemExit) as ctx:
                 wizard._ask("q")
-        self.assertEqual(ctx.exception.code, 130)
+        self.assertEqual(ctx.exception.code, wizard.EOF_CODE)
+
+    def test_choose_back_adds_a_zero_row(self):
+        with mock.patch("builtins.input", return_value="0"):
+            with self.assertRaises(wizard._Back):
+                wizard._choose("pick", [("a", "A"), ("b", "B")], back="返回")
+
+    def test_ask_back_returns_none_on_enter(self):
+        with mock.patch("builtins.input", return_value=""):
+            with self.assertRaises(wizard._Back):
+                wizard._ask_back("dir")
+
+    def test_limit_accepts_a_for_all(self):
+        with mock.patch("builtins.input", return_value="a"):
+            self.assertIsNone(wizard._limit())
+
+    def test_limit_enter_goes_back(self):
+        with mock.patch("builtins.input", return_value=""):
+            with self.assertRaises(wizard._Back):
+                wizard._limit()
 
     def test_choose_reprompts(self):
         with mock.patch("builtins.input", side_effect=["9", "2"]):

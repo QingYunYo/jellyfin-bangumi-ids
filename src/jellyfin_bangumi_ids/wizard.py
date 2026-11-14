@@ -35,6 +35,12 @@ _T: Dict[str, Tuple[str, str]] = {
     "menu": ("选择", "choose"),
     "back": ("回车继续…", "press enter to continue…"),
     "back_menu": ("返回", "back"),
+    "hint": ("方括号里是直接回车时采用的默认值；0 永远是返回、退出或取消。",
+             "the bracket shows what Enter picks; 0 always means back, exit or cancel."),
+    "eof": ("输入流结束，已退出。", "input ended, exiting."),
+    "yes_word": ("是", "yes"),
+    "no_word": ("取消", "no"),
+    "clear_borrowed": ("清空借用正片 ID 的番外？", "clear specials that borrow a main-episode id?"),
     "bye": ("再见。", "bye."),
     "noninteractive": ("非交互模式：全部取默认值（写操作一律不执行）。",
                        "non-interactive: every default is taken (nothing is written)."),
@@ -64,9 +70,9 @@ _T: Dict[str, Tuple[str, str]] = {
     "not_found": ("还是没找到。", "still not found."),
     "library": ("库", "library"),
     "all_libs": ("全部库", "all libraries"),
-    "limit": ("先处理多少部（留空=全部）", "how many series (empty = all)"),
+    "limit": ("部数", "series count"),
     "series": ("剧集", "series"),
-    "pick_series": ("选择剧集编号", "pick a series number"),
+    "pick_series": ("编号或剧名", "number or name"),
     "confirm_write": ("确认写入？", "write these changes?"),
     "bulk": ("这是批量改动，输入条数再确认", "bulk change: type the count to confirm"),
     "confirm_refresh": ("写完后刷新这些条目？", "refresh those items afterwards?"),
@@ -87,7 +93,7 @@ _T: Dict[str, Tuple[str, str]] = {
     "config": ("配置", "config"),
     "exit": ("退出", "exit"),
     "no_backups": ("找不到备份文件（先跑一次会写库的操作）。", "no backup files yet."),
-    "pick_backup": ("选择备份编号", "pick a backup number"),
+    "pick_backup": ("编号", "number"),
     "restore_confirm": ("确认用这个备份还原？", "restore from this backup?"),
 }
 
@@ -101,38 +107,83 @@ _LANG = ["zh"]
 _NONINTERACTIVE = [False]
 
 
-def _ask(prompt: str, default: str = "") -> str:
-    tail = " [%s]" % default if default else ""
+class _Back(Exception):
+    """The user asked to go back one level; the menu loop redraws itself."""
+
+
+EOF_CODE = 3
+
+
+def _eof() -> None:
+    if _NONINTERACTIVE[0]:
+        return
+    print("")
+    print(t("eof"))
+    raise SystemExit(EOF_CODE)
+
+
+def _ask(prompt: str, default: str = "", hint: Optional[str] = None) -> str:
+    """A free-text answer; the bracket always says what Enter picks."""
+    if hint:
+        tail = "[%s]" % hint
+    elif default:
+        tail = "[直接回车默认选%s=%s]" % (default, default)
+    else:
+        tail = "[直接回车=空]"
     try:
         raw = input("%s%s: " % (prompt, tail))
     except EOFError:
         if _NONINTERACTIVE[0]:
             return default
-        raise SystemExit(130)
+        _eof()
+        return default
     return raw.strip() or default
 
 
+def _h(word: str, default: str = "0") -> str:
+    return "直接回车默认选%s=%s" % (default, word)
+
+
+def _ask_back(prompt: str) -> Optional[str]:
+    """Free text where Enter (or 0) means 'go back'."""
+    raw = _ask(prompt, "0")
+    if raw in ("0", ""):
+        raise _Back()
+    return raw
+
+
 def _confirm(prompt: str, default: bool = False) -> bool:
-    tail = " [Y/n]" if default else " [y/N]"
+    word = "Y" if default else "N"
+    tail = "[直接回车默认选%s=%s]" % (word, t("yes_word") if default else t("no_word"))
     try:
         raw = input("%s%s: " % (prompt, tail)).strip().lower()
     except EOFError:
         if _NONINTERACTIVE[0]:
             return default
-        raise SystemExit(130)
+        _eof()
+        return default
     if not raw:
         return default
     return raw in ("y", "yes", "是", "确认")
 
 
-def _choose(prompt: str, options: List[Tuple[str, str]]) -> str:
-    for index, (_, label) in enumerate(options, 1):
+def _choose(prompt: str, options: List[Tuple[str, str]], back: Optional[str] = None) -> str:
+    """A numbered menu. `back` adds "0) <back>" and makes Enter mean 0."""
+    opts = list(options)
+    for index, (_, label) in enumerate(opts, 1):
         print("  %d) %s" % (index, label))
+    if back:
+        print("  0) %s" % back)
     while True:
-        raw = _ask(prompt, "1")
-        if raw.isdigit() and 1 <= int(raw) <= len(options):
-            return options[int(raw) - 1][0]
-        for key, label in options:
+        if back:
+            raw = _ask(prompt, "0", hint=_h("返回"))
+        else:
+            raw = _ask(prompt, "1", hint=_h("第一项", "1"))
+        if back and raw == "0":
+            raise _Back()
+        if raw.isdigit() and 1 <= int(raw) <= len(opts):
+            return opts[int(raw) - 1][0]
+        for key, label in opts:
             if raw == key:
                 return key
         print("  ?")
@@ -222,14 +273,15 @@ def _archive(args, jf) -> Optional[str]:
         for item in attempts():
             print("  - %s (%s) -> %s" % (item["path"], item["label"], item["status"]))
         mode = _choose(t("archive_fix"),
-                       [("path", t("arch_path")), ("root", t("arch_root")), ("skip", t("arch_skip"))])
+                       [("path", t("arch_path")), ("root", t("arch_root")), ("skip", t("arch_skip"))],
+                       back=t("back_menu"))
         if mode == "skip":
             return None
         if mode == "path":
-            found = find_archive(jf, _ask(t("ask_path")))
+            found = find_archive(jf, _ask_back(t("ask_path")))
         else:
-            found = find_archive(jf, root=_ask(t("ask_root")), search=True)
-        if found and _confirm(t("arch_save"), default=True):
+            found = find_archive(jf, root=_ask_back(t("ask_root")), search=True)
+        if found and not _NONINTERACTIVE[0] and _confirm(t("arch_save"), default=False):
             settings.save({"archive": found})
             print("  config: %s" % settings.config_path())
         if not found:
@@ -243,11 +295,15 @@ def _library(sess: Session) -> Optional[str]:
     except Exception:  # noqa: BLE001
         names = []
     options = [("", t("all_libs"))] + [(name, name) for name in names]
-    return _choose(t("library"), options) or None
+    return _choose(t("library"), options, back=t("back_menu")) or None
 
 
 def _limit() -> Optional[int]:
-    raw = _ask(t("limit"))
+    raw = _ask(t("limit"), "0", hint=_h("返回") + "，输a=全部")
+    if raw == "0":
+        raise _Back()
+    if raw.lower() == "a":
+        return None
     return int(raw) if raw.isdigit() and int(raw) > 0 else None
 
 
@@ -255,11 +311,14 @@ def _series(sess: Session, library: Optional[str]) -> str:
     series = sess.jf.all_series(library_name=library)
     visible = series[:40]
     if len(series) > len(visible):
-        print("  (1-%d of %d)" % (len(visible), len(series)))
+        print("  (1-%d / 共 %d 部)" % (len(visible), len(series)))
     for index, item in enumerate(visible, 1):
         print("  %3d) %s" % (index, item.get("Name")))
+    print("    0) %s" % t("back_menu"))
     while True:
-        raw = _ask(t("pick_series"))
+        raw = _ask(t("pick_series"), "0")
+        if raw == "0":
+            raise _Back()
         if raw.isdigit() and 1 <= int(raw) <= len(visible):
             return visible[int(raw) - 1]["Id"]
         for item in visible:
@@ -277,8 +336,8 @@ def _bulk_confirm(sess: Session, count: int) -> bool:
         return False
     if count <= BULK_LIMIT or sess.assume_yes:
         return True
-    typed = _ask("%s (%d)" % (t("bulk"), count))
-    return typed.strip() == str(count)
+    raw = _ask("%s (%d)" % (t("bulk"), count), "0", hint="直接回车默认选0=取消")
+    return raw == str(count)
 
 
 def _lib(library: Optional[str]) -> str:
@@ -367,8 +426,10 @@ def _flow_specials(sess: Session, library: Optional[str] = None,
     library = library if library is not None else _library(sess)
     limit = None if series_id else _limit()
     out = sess.report_path("specials")
+    clear = False if sess.assume_yes else sess.confirm(t("clear_borrowed"))
     report = run_specials(sess.jf, sess.bgm, library=library, limit=limit, out=out,
-                          series_ids=[series_id] if series_id else None)
+                          series_ids=[series_id] if series_id else None,
+                          clear_borrowed=clear)
     summary = report["summary"]
     print("")
     print("  %-16s %s" % ("matched", summary.get("specials_matched", 0)))
@@ -383,8 +444,9 @@ def _flow_specials(sess: Session, library: Optional[str] = None,
     backup = sess.backup_path("specials")
     apply_report(sess.jf, report, backup_path=backup)
     _print_tail(sess, backup if os.path.exists(backup) else None,
-                "jbmid special%s%s && jbmid apply %s" % (
-                    _lib(library), " --series-id %s" % series_id if series_id else "", out))
+                "jbmid special%s%s%s && jbmid apply %s" % (
+                    _lib(library), " --series-id %s" % series_id if series_id else "",
+                    " --clear-borrowed" if clear else "", out))
 
 
 def _flow_sync(sess: Session) -> None:
@@ -394,7 +456,7 @@ def _flow_sync(sess: Session) -> None:
     os.makedirs(backup_dir, exist_ok=True)
     # preview first: the same pipeline, writing nothing
     preview = run_sync(sess.jf, sess.bgm, archive=sess.archive, library=library, limit=limit,
-                       dry_run=True, backup_dir=backup_dir)
+                       dry_run=True, backup_dir=backup_dir, out_dir=backup_dir)
     print("")
     print("  %-16s %s" % ("exit", preview.get("exit")))
     for step in preview.get("steps") or []:
@@ -405,7 +467,7 @@ def _flow_sync(sess: Session) -> None:
             _lib(library), " --limit %d" % limit if limit else ""))
         return
     result = run_sync(sess.jf, sess.bgm, archive=sess.archive, library=library, limit=limit,
-                      dry_run=False, backup_dir=backup_dir)
+                      dry_run=False, backup_dir=backup_dir, out_dir=backup_dir)
     print("")
     print("  %-16s %s" % ("exit", result.get("exit")))
     for step in result.get("steps") or []:
@@ -436,7 +498,9 @@ def _flow_rollback(sess: Session) -> None:
         return
     for index, name in enumerate(names[:15], 1):
         print("  %3d) %s" % (index, name))
-    raw = _ask(t("pick_backup"))
+    raw = _ask(t("pick_backup"), "0")
+    if raw == "0":
+        raise _Back()
     if not (raw.isdigit() and 1 <= int(raw) <= min(15, len(names))):
         print("  ?")
         return
@@ -461,11 +525,9 @@ def _flow_config(sess: Session) -> None:
     for key in settings.KEYS:
         print("  %-13s: %s" % (key, data.get(key) or "(unset)"))
     mode = _choose(t("config"), [("archive", "archive"), ("archive_root", "archive_root"),
-                                 ("url", "url"), ("unset", "--unset"), ("back", t("back_menu"))])
-    if mode == "back":
-        return
+                                 ("url", "url"), ("unset", "--unset")], back=t("back_menu"))
     if mode == "unset":
-        key = _choose("key", [(k, k) for k in settings.KEYS])
+        key = _choose("key", [(k, k) for k in settings.KEYS], back=t("back_menu"))
         settings.unset(key)
         print("  unset: %s" % key)
         return
@@ -479,7 +541,7 @@ def _flow_single(sess: Session) -> None:
     library = _library(sess)
     series_id = _series(sess, library)
     mode = _choose(t("series"), [("episodes", t("episodes")), ("seasons", t("seasons")),
-                                 ("specials", t("specials"))])
+                                 ("specials", t("specials"))], back=t("back_menu"))
     if mode == "episodes":
         _flow_episodes(sess, library=library, series_id=series_id)
     elif mode == "seasons":
@@ -495,7 +557,7 @@ MENU = [
     ("4", "specials", "修番外 ID（special → apply）"),
     ("5", "sync", "一条龙（sync）"),
     ("6", "rollback", "回滚（从备份还原）"),
-    ("7", "single", "单剧 / 单库"),
+    ("7", "single", "单剧（按剧修）"),
     ("8", "config", "配置（config）"),
     ("0", "exit", "退出"),
 ]
@@ -507,7 +569,7 @@ MENU_EN = [
     ("4", "specials", "fix specials (special -> apply)"),
     ("5", "sync", "one-shot (sync)"),
     ("6", "rollback", "rollback from a backup"),
-    ("7", "single", "one series / one library"),
+    ("7", "single", "one series"),
     ("8", "config", "config"),
     ("0", "exit", "exit"),
 ]
@@ -533,6 +595,7 @@ def run(args) -> int:
     if sess is None:
         return 1
     _banner(sess)
+    print(t("hint"))
     handlers = {
         "verify": _flow_verify,
         "episodes": _flow_episodes,
@@ -546,7 +609,7 @@ def run(args) -> int:
     while True:
         print("")
         _menu()
-        choice = _ask(t("menu"), "0")
+        choice = _ask(t("menu"), "0", hint=_h("退出"))
         action = None
         for key, name, _ in MENU if _LANG[0] == "zh" else MENU_EN:
             if choice == key:
@@ -560,6 +623,8 @@ def run(args) -> int:
             return 0
         try:
             handlers[action](sess)
+        except _Back:
+            continue
         except KeyboardInterrupt:
             print("")
             print(t("cancelled"))
@@ -568,5 +633,3 @@ def run(args) -> int:
             raise
         except Exception as exc:  # noqa: BLE001 - keep the menu alive
             print("  ! %s" % exc)
-        if not sess.assume_yes:
-            _ask(t("back"))
