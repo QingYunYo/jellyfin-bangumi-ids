@@ -4,6 +4,10 @@
 
 ## 0.1.5（未发布）
 
+- **交互向导 `jbmid wizard`**：把常用流程做成菜单（体检 / 修集级 / 修季级 / 修番外 / 一条龙 /
+  回滚 / 单剧单库 / 配置）。每个写操作先给预览、再问一次，默认答案是不写；一次超过 50 条改动要求
+  输入条数。启动时复用第 6 章的档案解析，找不到就先把尝试过的路径和失败原因打出来。写完打印备份、
+  `jbmid rollback` 命令和等价的非交互命令。非 TTY 拒绝执行（除非 `--yes`），`--lang en` 切英文菜单。
 - **配置文件**：新增 `jbmid config`，把 `archive` / `archive_root` / `url` 存进
   `~/.config/jellyfin-bangumi-ids/config.json`（Windows `%APPDATA%`，`JBMID_CONFIG_DIR` 可改，
   权限 0600）。只存路径，**不存 API Key**；`--unset` 删单项，不带参数只显示。`--url` 的取值顺序

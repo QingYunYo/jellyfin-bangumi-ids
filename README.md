@@ -118,8 +118,8 @@ episodes       : 0 to write
 
 ## 4. 模式与用法
 
-先看一张表。选模式的唯一硬标准是**写不写**——拿不准就加 `--dry-run`。单个模式的用法见 4.1–4.9，
-**真实修复时几个模式怎么排顺序见 [4.10](#410-综合用法真实修复时的顺序)**。
+先看一张表。选模式的唯一硬标准是**写不写**——拿不准就加 `--dry-run`。单个模式的用法见 4.1–4.10，
+**真实修复时几个模式怎么排顺序见 [4.11](#411-综合用法真实修复时的顺序)**。
 
 | 模式 | 干什么 | 输入 | 写不写 |
 | --- | --- | --- | --- |
@@ -134,8 +134,29 @@ episodes       : 0 to write
 | `protect` | 让插件别覆盖手写 ID | — | 改插件配置 |
 | `rollback` | 按备份还原 | 备份 JSON | 写 |
 | `doctor` | 连通性 / 数据源 / 插件状态 | — | 只读 |
+| `wizard` | 交互向导：上面这些流程点菜单 | — | 默认只预览 |
+| `config` | 记住档案路径 / 服务器地址 | — | 写配置文件 |
 
-### 4.1 `scan`：先看清全局，再动手
+### 4.1 `wizard`：不想背参数就用它
+
+`jbmid wizard` 把常用流程做成菜单，**每个写操作都先给预览、再问一次**，默认答案是「不写」：
+
+```bash
+jbmid wizard            # 中文菜单（默认）
+jbmid wizard --lang en  # 英文菜单
+jbmid wizard --write    # 提前把「确认写入」设为是（仍然先预览）
+jbmid wizard --yes      # 非交互：全部取默认值（默认不写，适合冒烟测试）
+```
+
+菜单有八项：体检、修集级、修季级、修番外、一条龙、回滚、单剧/单库、配置。启动时会自动解析
+服务器地址与离线档案（顺序同第 6 章）；找不到档案时不是干问路径，而是先把尝试过的路径和失败原因
+打出来，再让你选「手输路径 / 告诉宿主挂载点 / 先用在线」。
+
+每次写入结束会打印三件事：备份文件、`jbmid rollback <备份>` 的还原命令、以及等价的非交互命令
+（方便你确认没问题后抄进 cron）。非交互环境（管道、CI）会直接拒绝并提示用子命令，除非显式
+`--yes`。
+
+### 4.2 `scan`：先看清全局，再动手
 
 最常用的入口：逐部剧找锚点、建池、按集名对齐、给出判定，**一个字都不写**。
 
@@ -157,7 +178,7 @@ jbmid scan --series-id 9a63c5f950cf05e5ba3796722a403f27
 `season 2 keeps its own subject 513878 (10/10 episodes)`。这条退路**只在整链失败时**启用——
 默认仍先整链，否则「一个季横跨两个条目」会被误拆成「这一季有自己的条目」。
 
-### 4.2 `apply` / `rollback`：报告落库与撤销
+### 4.3 `apply` / `rollback`：报告落库与撤销
 
 ```bash
 jbmid apply report.json --dry-run                 # 先看要改多少集
@@ -174,7 +195,7 @@ jbmid rollback jbmid-backup.json --dry-run
 `Name` / `Overview` / `PremiereDate` 不受影响；锁定字段也不会被覆盖。`season` / `auto` 同样接受
 `--refresh`。
 
-### 4.3 `season`：季划分对不上时
+### 4.4 `season`：季划分对不上时
 
 本地季数 ≠ 链上条目数、或顺序不同时用。JSON 写「第几季 = 哪些 subject」：
 
@@ -188,7 +209,7 @@ jbmid season --map map.json --dry-run
 
 `sp: true` 表示这一季按番外处理（对齐 Bangumi 的 `type=1` 集）。
 
-### 4.4 `auto`：一把梭
+### 4.5 `auto`：一把梭
 
 不指定锚点，按剧名搜条目、按集名对齐，然后直接写：
 
@@ -199,7 +220,7 @@ jbmid auto --library 动漫
 
 它最省事，也最需要看结果：每部剧都会打印 `method`（`name` / `season-map` / `stored` / `order`）。
 
-### 4.5 `special`：番外、OVA、总集篇
+### 4.6 `special`：番外、OVA、总集篇
 
 Season 0 和名字含 `番外|OVA|OAD|SP|总集篇|特典` 的集，对齐 Bangumi 的 `type=1` 集：
 
@@ -209,7 +230,7 @@ jbmid apply specials.json
 jbmid special --library 动漫 --clear-borrowed   # 清掉借用了正片 ID 的番外
 ```
 
-### 4.6 `anchor`：锚点本身错了
+### 4.7 `anchor`：锚点本身错了
 
 只修一部剧的锚点，也能修季级 ID：
 
@@ -222,7 +243,7 @@ jbmid anchor --library 动漫 --seasons --all --clear-spans    # 横跨季清空
 取值顺序：**集级反查 → 季级多数票 → 剧集自己的 ID → 标题搜索**，都要过标题校验；`--force` 接收可疑值，
 `--clear` 清空。
 
-### 4.7 `verify`：只读体检
+### 4.8 `verify`：只读体检
 
 ```bash
 jbmid verify --library 动漫                              # 一行汇总 + 分类明细
@@ -233,7 +254,7 @@ jbmid verify --library 动漫 --fail-on season-ids,dup     # 有命中就 exit 1
 各字段含义见[第 5 章](#5-季级-id为什么必须一起修)；`--fail-on` 可选 `unknown dup low-sim
 disorder foreign anchors season-ids season-spans none`。
 
-### 4.8 `protect` / `doctor`
+### 4.9 `protect` / `doctor`
 
 ```bash
 jbmid protect     # 把 TrustExistedBangumiId 设为 True，刷新不再覆盖
@@ -242,9 +263,9 @@ jbmid doctor      # 连通性 / 数据源 / 插件状态
 
 两份 README 里的示例输出都来自 [`examples/`](examples/README.md)（真实报告与备份的节选，附字段说明）。
 
-### 4.9 `sync`：一条龙
+### 4.10 `sync`：一条龙
 
-把 4.10 那张顺序表里最常一起跑的五步串起来：`scan` → `apply` → `anchor --seasons` → `special` → `verify`。
+把 4.11 那张顺序表里最常一起跑的五步串起来：`scan` → `apply` → `anchor --seasons` → `special` → `verify`。
 
 ```bash
 jbmid sync --library 动漫 --dry-run              # 五步都只打印，一个字不写
@@ -256,7 +277,7 @@ jbmid sync --series-id 9a63c5f950cf05e5ba3796722a403f27   # 只处理一部
 让 `scan` 一遇 `review` 就收工；`--fail-on season-ids,dup` 把最后的体检结论变成退出码，适合塞进
 cron / CI。`--backup-dir` 与 `--out-dir` 决定备份和中间报告放哪。
 
-### 4.10 综合用法：真实修复时的顺序
+### 4.11 综合用法：真实修复时的顺序
 
 实际使用时这几个模式是**混着用**的，不是挑一个跑完就完事。第一次上手按这个顺序走一遍：
 

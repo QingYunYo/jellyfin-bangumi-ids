@@ -20,6 +20,7 @@ from .season import load_mapping, scan_seasons
 from .sync import run_sync
 from .transport import force_ipv4
 from .verify import fail_on_breaches, run_verify, run_verify_offline
+from .wizard import run as run_wizard
 
 DEFAULT_URL = "http://127.0.0.1:8096"
 
@@ -305,6 +306,10 @@ def cmd_doctor(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_wizard(args: argparse.Namespace) -> int:
+    return run_wizard(args)
+
+
 def cmd_config(args: argparse.Namespace) -> int:
     for key in args.unset or []:
         settings.unset(key)
@@ -474,6 +479,15 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("doctor", help="check connectivity and plugin state")
     common(p)
     p.set_defaults(func=cmd_doctor)
+
+    p = sub.add_parser("wizard", help="interactive picker for the common flows")
+    common(p)
+    p.add_argument("--lang", choices=["zh", "en"], default=None, help="menu language")
+    p.add_argument("--yes", action="store_true",
+                   help="non-interactive: take every default (which never writes)")
+    p.add_argument("--write", action="store_true",
+                   help="pre-answer the write prompts with yes (still previews first)")
+    p.set_defaults(func=cmd_wizard)
 
     p = sub.add_parser("config", help="remember the archive path or the server URL")
     p.add_argument("--archive", metavar="DIR", help="Bangumi plugin archive directory")

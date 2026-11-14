@@ -124,7 +124,7 @@ Three numbers: `series ok` aligned, `series review` uncertain (**not written**, 
 ## 4. Modes and usage
 
 One table first. The only hard rule for picking a mode is **whether it writes** — when in doubt, add
-`--dry-run`. Individual modes are 4.1–4.9; **[4.10](#410-putting-it-together-the-order-that-actually-works) is
+`--dry-run`. Individual modes are 4.1–4.10; **[4.11](#411-putting-it-together-the-order-that-actually-works) is
 how to combine them on a real repair**.
 
 | Mode | What it does | Input | Writes? |
@@ -140,8 +140,31 @@ how to combine them on a real repair**.
 | `protect` | stop the plugin from overwriting hand-written IDs | — | plugin setting |
 | `rollback` | restore from a backup | backup JSON | writes |
 | `doctor` | connectivity / data source / plugin state | — | read-only |
+| `wizard` | interactive menu over the flows above | — | preview first |
+| `config` | remember the archive path / server URL | — | writes config |
 
-### 4.1 `scan`: look before you leap
+### 4.1 `wizard`: skip the flags
+
+`jbmid wizard` turns the common flows into a menu. Every write is previewed first and then asked
+again, and the default answer is "no":
+
+```bash
+jbmid wizard            # Chinese menu (default)
+jbmid wizard --lang en  # English menu
+jbmid wizard --write    # pre-answer the write prompts with yes (it still previews)
+jbmid wizard --yes      # non-interactive: take every default (which never writes)
+```
+
+Eight entries: check, fix episode ids, fix season ids, fix specials, one-shot, rollback, one
+series/library, config. On start it resolves the server URL and the offline archive (chapter 6); when no
+archive is found it prints the paths it tried and why, then offers to type a path, give the host mount
+point, or go online.
+
+Each write ends with three lines: the backup file, the `jbmid rollback <backup>` command, and the
+equivalent non-interactive command you can paste into cron. Non-interactive shells (pipes, CI) are
+refused unless you pass `--yes`.
+
+### 4.2 `scan`: look before you leap
 
 The usual entry point: for every show it finds an anchor, builds a pool, aligns by episode title and
 decides — **without writing anything**.
@@ -166,7 +189,7 @@ subject first, while the other seasons still walk the chain (`notes` then say
 chain failed**; by default the chain still decides, otherwise a season that legitimately spans two
 subjects would be split into "this season owns one subject".
 
-### 4.2 `apply` / `rollback`: land the report, or undo it
+### 4.3 `apply` / `rollback`: land the report, or undo it
 
 ```bash
 jbmid apply report.json --dry-run                 # how many episodes would change
@@ -185,7 +208,7 @@ been mapped to the previous season's episodes: the refresh changed `OriginalTitl
 season's title to the correct one and left `Name` / `Overview` / `PremiereDate` untouched; locked
 fields are never overwritten. `season` and `auto` accept `--refresh` too.
 
-### 4.3 `season`: when Bangumi's seasons don't line up
+### 4.4 `season`: when Bangumi's seasons don't line up
 
 Use it when the number of local seasons differs from the chain, or the order is off. The JSON says
 "season N = these subjects":
@@ -200,7 +223,7 @@ jbmid season --map map.json --dry-run
 
 `sp: true` treats that season as specials (aligns against Bangumi `type=1` episodes).
 
-### 4.4 `auto`: the one-shot
+### 4.5 `auto`: the one-shot
 
 No anchor given: it searches subjects by title, aligns by episode name and writes:
 
@@ -212,7 +235,7 @@ jbmid auto --library Anime
 Easiest to run, and the mode most worth reading: every show prints its `method`
 (`name` / `season-map` / `stored` / `order`).
 
-### 4.5 `special`: specials, OVA, recaps
+### 4.6 `special`: specials, OVA, recaps
 
 Season 0 and episodes containing `番外|OVA|OAD|SP|总集篇|特典` are aligned against Bangumi `type=1`
 episodes:
@@ -223,7 +246,7 @@ jbmid apply specials.json
 jbmid special --library Anime --clear-borrowed   # clear specials that borrowed a regular episode ID
 ```
 
-### 4.6 `anchor`: the anchor itself is wrong
+### 4.7 `anchor`: the anchor itself is wrong
 
 Repins a single show, and repairs season-level IDs:
 
@@ -236,7 +259,7 @@ jbmid anchor --library Anime --seasons --all --clear-spans   # clear seasons tha
 Lookup order: **episode-parent → season-ID vote → the series' own ID → title search**, all behind a title
 check; `--force` accepts dubious values, `--clear` removes them.
 
-### 4.7 `verify`: the read-only audit
+### 4.8 `verify`: the read-only audit
 
 ```bash
 jbmid verify --library Anime                          # one summary line + category detail
@@ -247,7 +270,7 @@ jbmid verify --library Anime --fail-on season-ids,dup # exit 1 on a hit (cron / 
 Field meanings are in [chapter 5](#5-season-ids-why-they-have-to-be-fixed-too); `--fail-on` accepts
 `unknown dup low-sim disorder foreign anchors season-ids season-spans none`.
 
-### 4.8 `protect` / `doctor`
+### 4.9 `protect` / `doctor`
 
 ```bash
 jbmid protect     # sets TrustExistedBangumiId = True so refreshes stop overwriting
@@ -256,9 +279,9 @@ jbmid doctor      # connectivity / data source / plugin state
 
 Every sample output in both READMEs comes from [`examples/`](examples/README.md) (real reports and backups, trimmed, with field notes).
 
-### 4.9 `sync`: the whole pipeline in one run
+### 4.10 `sync`: the whole pipeline in one run
 
-It chains the five steps of the 4.10 table: `scan` → `apply` → `anchor --seasons` → `special` → `verify`.
+It chains the five steps of the 4.11 table: `scan` → `apply` → `anchor --seasons` → `special` → `verify`.
 
 ```bash
 jbmid sync --library Anime --dry-run              # prints every step, writes nothing
@@ -271,7 +294,7 @@ half-applied state forward. `--stop-on-review` stops right after `scan` if anyth
 `--fail-on season-ids,dup` turns the final audit into an exit code for cron / CI. `--backup-dir` and
 `--out-dir` choose where backups and intermediate reports go.
 
-### 4.10 Putting it together: the order that actually works
+### 4.11 Putting it together: the order that actually works
 
 In practice these modes are **used together**, not one and done. On a first pass, walk this order:
 
