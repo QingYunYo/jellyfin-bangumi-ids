@@ -22,6 +22,7 @@ from .sync import run_sync
 from .transport import HttpError, NetError, force_ipv4, set_verbose
 from .verify import fail_on_breaches, run_verify, run_verify_offline
 from .wizard import language, set_lang
+from .wizard import t as _wt
 from .wizard import config_flow as config_wizard
 from .wizard import run as run_wizard
 from .wizard import setup as run_setup
@@ -384,8 +385,9 @@ def cmd_config(args: argparse.Namespace) -> int:
         try:
             settings.save(values)
         except OSError as exc:
-            print("cannot write %s (%s); keep using JF_URL / JF_API_KEY / JBMID_ARCHIVE"
-                  % (settings.config_path(), exc), file=sys.stderr)
+            print("  %s: %s" % (_wt("not_wrote"),
+                                 _wt("cannot_write") % (settings.config_path(), exc)),
+                  file=sys.stderr)
             return 1
         print("saved     : %s" % ", ".join(sorted(values)))
     if args.test:
