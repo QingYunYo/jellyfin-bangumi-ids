@@ -523,6 +523,29 @@ class LanguageTest(unittest.TestCase):
         os.environ.update(self.saved)
         wizard._LANG[0] = "zh"
 
+    def test_stored_language_beats_the_locale(self):
+        """`jbmid config --lang zh` must survive into the next process."""
+        with tempfile.TemporaryDirectory() as tmp:
+            old = os.environ.get("JBMID_CONFIG_DIR")
+            os.environ["JBMID_CONFIG_DIR"] = tmp
+            try:
+                settings.save({"lang": "zh"})
+                os.environ["LANG"] = "en_US.UTF-8"
+                self.assertEqual(wizard.set_lang(None), "zh")
+                self.assertEqual(wizard.language(), "zh")
+                os.environ["JBMID_LANG"] = "en"
+                self.assertEqual(wizard.set_lang(None), "en")
+            finally:
+                if old is None:
+                    os.environ.pop("JBMID_CONFIG_DIR", None)
+                else:
+                    os.environ["JBMID_CONFIG_DIR"] = old
+
+    def test_config_root_label_mentions_windows_and_docker(self):
+        label = wizard.t("cfg_root")
+        self.assertIn("ProgramData", label)
+        self.assertIn("/config", label)
+
     def test_unset_locale_stays_chinese(self):
         self.assertEqual(wizard.detect_lang(), "zh")
 

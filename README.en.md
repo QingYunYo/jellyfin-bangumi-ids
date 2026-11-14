@@ -38,7 +38,7 @@ Run the bundled launcher from the checkout instead — it touches no system dire
 ```bash
 git clone https://github.com/QingYunYo/jellyfin-bangumi-ids.git
 cd jellyfin-bangumi-ids
-./jbmid doctor        # same as the installed jbmid doctor
+./jbmid               # just run it; it asks for language, URL and key first
 ```
 
 Prefer a real install without touching system Python? `python3 -m venv .venv && . .venv/bin/activate && pip install -e .`

@@ -165,7 +165,10 @@ _T: Dict[str, Tuple[str, str]] = {
                      "cannot write %s (%s); the value is used for this run only. Set "
                      "JBMID_CONFIG_DIR to a writable directory, or use sudo."),
     "cfg_archive": ("离线档案目录", "offline archive directory"),
-    "cfg_root": ("宿主机上 Jellyfin 的 data 挂载点", "host directory holding Jellyfin's data mount"),
+    "cfg_root": ("Jellyfin 的 data 目录（Windows 默认 C:\\ProgramData\\Jellyfin\\Server\\data；"
+                 "Docker 填 /config 对应的宿主机目录）",
+                 "Jellyfin's data directory (Windows: C:\\ProgramData\\Jellyfin\\Server\\data; "
+                 "Docker: the host directory mounted at /config)"),
     "cfg_lang": ("界面语言", "interface language"),
     "ask_lang": ("界面语言（中文 / English）", "interface language (中文 / English)"),
     "lang_saved": ("界面语言：%s", "interface language: %s"),
@@ -221,11 +224,29 @@ def detect_lang() -> str:
 
 
 def set_lang(value: Optional[str]) -> str:
-    """Apply an explicit --lang, else fall back to detect_lang()."""
+    """Apply an explicit --lang, then JBMID_LANG, then the stored config, then the locale.
+
+    The stored value has to be consulted here: `jbmid config` writes `lang` to disk, and a
+    later `jbmid` with no flags must pick it up instead of falling back to the locale.
+    """
+    lang = ""
     if value:
         lang = "en" if value.lower().startswith("en") else "zh"
     else:
-        lang = detect_lang()
+        forced = (os.environ.get("JBMID_LANG") or "").strip().lower()
+        if forced.startswith(("zh", "en")):
+            lang = "en" if forced.startswith("en") else "zh"
+        else:
+            try:
+                stored = str(settings.load().get("lang") or "").strip().lower()
+            except Exception:
+                stored = ""
+            if stored.startswith("en"):
+                lang = "en"
+            elif stored.startswith("zh"):
+                lang = "zh"
+            else:
+                lang = detect_lang()
     _LANG[0] = lang
     return lang
 
@@ -1264,7 +1285,7 @@ def run(args) -> int:
     while True:
         print("")
         _menu()
-        choice = _ask(t("menu"), "0", hint=_h("退出"))
+        choice = _ask(t("menu"), "0", hint=_h(t("exit")))
         action = None
         for key, name, _ in MENU if _LANG[0] == "zh" else MENU_EN:
             if choice == key:

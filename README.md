@@ -36,7 +36,7 @@ pip install git+https://github.com/QingYunYo/jellyfin-bangumi-ids.git
 ```bash
 git clone https://github.com/QingYunYo/jellyfin-bangumi-ids.git
 cd jellyfin-bangumi-ids
-./jbmid doctor        # 等价于装好后的 jbmid doctor
+./jbmid               # 直接跑；首次会问你语言、地址和 Key
 ```
 
 想装进虚拟环境：`python3 -m venv .venv && . .venv/bin/activate && pip install -e .`。
