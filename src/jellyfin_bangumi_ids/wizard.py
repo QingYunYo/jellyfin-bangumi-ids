@@ -57,6 +57,7 @@ _T: Dict[str, Tuple[str, str]] = {
     "conn_hint": ("检查地址、防火墙，容器网络问题可加 --ipv4", "check the URL; try --ipv4"),
     "source_offline": ("数据源：离线档案", "data source: offline archive"),
     "source_online": ("数据源：在线 API", "data source: online API"),
+    "online_word": ("在线 API", "online API"),
     "archive_missing": ("没找到离线档案（会全程走在线 API，慢很多）",
                         "no offline archive found (everything goes online, much slower)"),
     "archive_fix": ("怎么处理档案", "what about the archive"),
@@ -485,7 +486,7 @@ def _banner(sess: Session) -> None:
     print("")
     print("jbmid %s   Jellyfin %s   %s" % (__version__, version, source))
     masked = settings.mask(settings.load().get("api_key", "")) or "(unset)"
-    print("  " + t("status") % (sess.url or "?", sess.archive or t("source_online"), masked))
+    print("  " + t("status") % (sess.url or "?", sess.archive or t("online_word"), masked))
     print("-" * 62)
 
 
