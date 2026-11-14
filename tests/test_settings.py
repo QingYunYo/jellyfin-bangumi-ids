@@ -1,6 +1,8 @@
 """The small config file: where it lives, what it stores, how it fails."""
 import io
 import json
+
+FAKE_KEY = "0f9e8d7c6b5a4938271605f4e3d2c1b0"
 import os
 import tempfile
 import unittest
@@ -35,11 +37,12 @@ class SettingsTest(unittest.TestCase):
         self.assertNotIn("bogus", settings.load())
 
     def test_api_key_is_stored_and_masked(self):
-        settings.save({"api_key": "TESTKEY0123456789abcdef0123456789ab"})
-        self.assertEqual(settings.load()["api_key"], "TESTKEY0123456789abcdef0123456789ab")
+        key = FAKE_KEY
+        settings.save({"api_key": key})
+        self.assertEqual(settings.load()["api_key"], key)
         shown = settings.mask(settings.load()["api_key"])
-        self.assertNotIn("c3cd496e", shown)
-        self.assertTrue(shown.startswith("e76c"))
+        self.assertNotIn(key[4:-4], shown)
+        self.assertTrue(shown.startswith(key[:4]))
         self.assertEqual(settings.mask("short"), "*****")
         self.assertEqual(settings.mask(""), "")
 

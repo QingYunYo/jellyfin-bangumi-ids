@@ -93,7 +93,8 @@ class NonTtyTest(unittest.TestCase):
         sess = session(tempfile.mkdtemp(), yes=True)
         with mock.patch.object(sys.stdin, "isatty", return_value=False), \
                 mock.patch.object(wizard, "_open", return_value=sess), \
-                mock.patch.object(wizard, "_ask", return_value="0"):
+                mock.patch.object(wizard, "_ask", return_value="0"), \
+                redirect_stdout(io.StringIO()):
             self.assertEqual(wizard.run(args(yes=True, lang="en")), 0)
 
 
