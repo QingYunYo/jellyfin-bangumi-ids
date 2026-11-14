@@ -87,7 +87,8 @@ jbmid doctor          # connectivity, data source, plugin state
 
 `doctor` reports whether it uses the live API or the offline archive, and whether the plugin has
 `TrustExistedBangumiId` enabled. Every command also accepts `--url` / `--api-key`, plus `--ipv4`
-(containers with no IPv6) and `--timeout`.
+(containers with no IPv6) and `--timeout`. Values you keep reusing can be stored with
+`jbmid config --url http://127.0.0.1:8096` or `jbmid config --archive DIR` (see chapter 6).
 
 ## 3. Quick start
 
@@ -362,11 +363,39 @@ turning API calls into primary-key lookups:
 | full `verify` | ~40 minutes | ~18 seconds |
 | full `scan` | ~12 minutes | ~2 minutes the first time (builds the index), then ~19 seconds |
 
-Lookup order: `--archive DIR` → `JBMID_ARCHIVE` → a copy inside the checkout (`_local/archive`) →
-auto-detect from `DataPath` in `/System/Info`. If the
-archive is missing, or an episode is not in it, the online API is used instead. The first run builds a
-~150 MB SQLite index inside the archive directory (source files are read-only). The archive refreshes every
-14 days; when it is stale, the live API wins.
+Lookup order (first hit wins):
+
+1. `--archive DIR` (works on every command)
+2. `JBMID_ARCHIVE` environment variable
+3. the config file: `jbmid config --archive DIR`
+4. a copy inside the checkout (`_local/archive`)
+5. Jellyfin's `DataPath` from `/System/Info`, when that path is readable **on this machine**
+
+**Jellyfin in Docker**: the plugin sees container paths such as `/config/data/bangumi/archive`, which do
+not exist on the host. Point the tool at the host directory and it maps them for you:
+
+```bash
+jbmid config --archive-root /volume1/docker/jellyfin   # your mount point
+jbmid doctor
+```
+
+Mapping tries the whole container path under that root, then with the first segment dropped, then the last
+three segments only (`data/bangumi/archive`). If the tree is deeper, add `--search-archive`
+(a bounded walk: 5 levels, 3 seconds).
+
+**A broken path never aborts detection**: when `JBMID_ARCHIVE` points at a deleted directory, the tool
+records the attempt and keeps looking instead of silently running online for 40 minutes. `jbmid doctor`
+prints every path it tried and why it failed (`missing` / `unreadable`) — fix it with one
+`jbmid config --archive DIR`.
+
+`jbmid config` stores `archive` / `archive_root` / `url` in
+`~/.config/jellyfin-bangumi-ids/config.json` (`%APPDATA%` on Windows, override with `JBMID_CONFIG_DIR`),
+mode 0600, and **never the API key** (that is `--api-key` / `JF_API_KEY` only). Use
+`jbmid config --unset archive` to drop one value; `jbmid config` alone just prints them.
+
+The SQLite index lives in `~/.cache/jellyfin-bangumi-ids/` (`JBMID_CACHE` overrides it), about 150 MB, and
+the source files stay read-only. The archive refreshes every 14 days; when it is stale the live API wins.
+Anything the archive cannot answer (new episodes, relations, title search) falls back to the online API.
 
 ## 7. Safety
 
@@ -446,7 +475,7 @@ movies.
 ## 10. Development
 
 ```bash
-PYTHONPATH=src python -m unittest discover -s tests   # 132 cases, fully offline (if not pip install -e .)
+PYTHONPATH=src python -m unittest discover -s tests   # 143 cases, fully offline (if not pip install -e .)
 ```
 
 CI runs the same suite on Python 3.8 / 3.10 / 3.12. Layout:

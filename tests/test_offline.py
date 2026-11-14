@@ -184,5 +184,44 @@ class ArchiveTestCase(unittest.TestCase):
         with self.no_repo_archive():
             self.assertIsNone(find_archive(JfNone()))
 
+    def test_bad_env_does_not_abort_the_search(self):
+        """One stale variable must not silently send a slow online run at the user."""
+        os.environ["JBMID_ARCHIVE"] = os.path.join(self.tmp, "gone")
+        try:
+            with mock.patch.object(offline, "_candidates_from_repo", lambda: [self.dir]):
+                self.assertEqual(find_archive(None), os.path.abspath(self.dir))
+        finally:
+            os.environ.pop("JBMID_ARCHIVE", None)
+        statuses = [(item["label"], item["status"]) for item in offline.attempts()]
+        self.assertIn(("JBMID_ARCHIVE", "missing"), statuses)
+
+    def test_archive_root_maps_a_container_path(self):
+        host_root = os.path.join(self.tmp, "jellyfin")
+        nested = os.path.join(host_root, "data", "bangumi", "archive")
+        write_archive(nested, SUBJECTS, EPISODES)
+
+        class Jf:
+            def get(self, path, params=None):
+                return {"ProgramDataPath": "/config", "DataPath": "/config",
+                        "InternalMetadataPath": "/config/metadata"}
+
+        with self.no_repo_archive():
+            self.assertEqual(find_archive(Jf(), root=host_root), os.path.abspath(nested))
+
+    def test_search_archive_finds_nested_copy(self):
+        nested = os.path.join(self.tmp, "root", "a", "b", "data", "bangumi", "archive")
+        write_archive(nested, SUBJECTS, EPISODES)
+        self.assertEqual(offline.search_archive(os.path.join(self.tmp, "root")),
+                         os.path.abspath(nested))
+        self.assertIsNone(offline.search_archive(os.path.join(self.tmp, "nothing")))
+
+    def test_unreadable_explicit_is_reported(self):
+        blocker = os.path.join(self.tmp, "blocked")
+        with open(blocker, "w", encoding="utf-8") as fh:
+            fh.write("not a directory")
+        with self.no_repo_archive():
+            self.assertIsNone(find_archive(None, blocker))
+        self.assertEqual(offline.attempts()[0]["status"], "unreadable")
+
 if __name__ == "__main__":
     unittest.main()

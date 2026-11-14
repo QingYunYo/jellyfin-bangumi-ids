@@ -2,8 +2,19 @@
 
 版本号从 0.1.0 起，按补丁号递增。
 
-## 未发布
+## 0.1.5（未发布）
 
+- **配置文件**：新增 `jbmid config`，把 `archive` / `archive_root` / `url` 存进
+  `~/.config/jellyfin-bangumi-ids/config.json`（Windows `%APPDATA%`，`JBMID_CONFIG_DIR` 可改，
+  权限 0600）。只存路径，**不存 API Key**；`--unset` 删单项，不带参数只显示。`--url` 的取值顺序
+  变成 `--url` → `JF_URL` → 配置文件 → 默认值。
+- **容器路径映射**：Jellyfin 在 Docker 里时插件报的是 `/config/data/bangumi/archive` 这类容器路径，
+  宿主机不存在，此前永远探测失败。新增 `--archive-root DIR` / `JBMID_ARCHIVE_ROOT`，把容器路径
+  整条拼在宿主目录下、去掉第一段、只取最后三段依次尝试；层数太深可加 `--search-archive`
+  （有界搜索 5 层 / 3 秒）。
+- **坏路径不再中止探测**：旧逻辑里 `--archive` 或 `JBMID_ARCHIVE` 指向一个失效目录就直接返回、静默
+  退回在线，一次误设就要跑 40 分钟。现在记下这条尝试继续往下找，`jbmid doctor` 会打印每条尝试过的
+  路径与失败原因（`missing` / `unreadable`）。
 - **仓库内自带档案**：`find_archive()` 在 `--archive` / `JBMID_ARCHIVE` 之后，会先看仓库里的
   `_local/archive`（自己的检出一份档案副本时用），找不到才去问 Jellyfin 的 `DataPath`。
   适合把档案拷到仓库旁、不装插件的机器。

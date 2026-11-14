@@ -84,6 +84,7 @@ jbmid doctor          # 连通性 + 数据源 + 插件状态
 
 `doctor` 会告诉你用的是在线 API 还是离线档案、插件是否已开 `TrustExistedBangumiId`。
 所有命令都接受 `--url` / `--api-key`，也支持 `--ipv4`（容器里只通 IPv4 时）和 `--timeout`。
+反复用到的值可以存起来：`jbmid config --url http://127.0.0.1:8096`、`jbmid config --archive DIR`，详见第 6 章。
 
 ## 3. 快速开始
 
@@ -331,7 +332,7 @@ ID 反查条目」，两边都对——第 1 章那段日志对照就是这个�
 
 ## 6. 用离线档案提速
 
-装了 Bangumi 插件并跑过「离线数据库更新」后，`{Jellyfin DataPath}/bangumi/archive/` 下有几份
+装了 Bangumi 插件并跑过「离线数据库更新」后，`{DataPath}/bangumi/archive/` 下有几份
 `.jsonlines`。本工具直接读它们，把在线请求换成主键查询：
 
 | 操作 | 在线 API | 离线档案（已建索引） |
@@ -339,10 +340,37 @@ ID 反查条目」，两边都对——第 1 章那段日志对照就是这个�
 | `verify` 全库 | 约 40 分钟 | 约 18 秒 |
 | `scan` 全库 | 约 12 分钟 | 首次建索引约 2 分钟，之后约 19 秒 |
 
-查找顺序：`--archive DIR` → 环境变量 `JBMID_ARCHIVE` → 仓库内 `_local/archive`（自己拷一份档案时用）
-→ `/System/Info` 的 `DataPath` 自动探测。
-档案找不到或某一集不在档案里，自动回退在线 API。首次使用会在档案目录建一个约 150 MB 的 SQLite 索引
-（只读源文件）。档案每 14 天更新一次，太旧时以在线 API 为准。
+**怎么指定档案**（按优先级）：
+
+1. `--archive DIR`（每条命令都能加）
+2. 环境变量 `JBMID_ARCHIVE`
+3. 配置文件：`jbmid config --archive DIR`
+4. 仓库内 `_local/archive`（自己拷一份档案时用）
+5. Jellyfin `/System/Info` 报告的 `DataPath` 在**当前机器上直接可读**时自动使用
+
+**Jellyfin 跑在 Docker 里**：插件看到的是容器内路径（如 `/config/data/bangumi/archive`），
+在宿主机上并不存在。把宿主目录告诉工具，它会自己映射：
+
+```bash
+jbmid config --archive-root /volume1/docker/jellyfin   # 换成你的挂载点
+jbmid doctor
+```
+
+映射规则：整条容器路径拼在宿主目录下 → 去掉第一段 → 只取最后三段（`data/bangumi/archive`），
+依次尝试。层数太深仍找不到时加 `--search-archive`（有界搜索：最多 5 层、3 秒）。
+
+**一个坏掉的路径不会中止探测**：`JBMID_ARCHIVE` 指向已删除的目录时，工具记下这条尝试继续往下找，
+而不是静默退回在线、让你等 40 分钟。`jbmid doctor` 会打印每一条尝试过的路径和失败原因
+（`missing` / `unreadable`），照着补一条 `jbmid config --archive DIR` 即可。
+
+`jbmid config` 把 `archive` / `archive_root` / `url` 存到
+`~/.config/jellyfin-bangumi-ids/config.json`（Windows 为 `%APPDATA%`，`JBMID_CONFIG_DIR` 可改），
+权限 0600，**不存 API Key**（API Key 只认 `--api-key` / `JF_API_KEY`）。
+`jbmid config --unset archive` 可删掉某一项，`jbmid config` 不带参数时只显示当前值。
+
+索引缓存放在 `~/.cache/jellyfin-bangumi-ids/`（`JBMID_CACHE` 可改），约 150 MB，只读源文件；
+档案每 14 天更新一次，太旧时以在线 API 为准。档案里没有的条目（新集、关系图、按标题搜索）
+自动回退在线 API。
 
 ## 7. 安全性
 
@@ -415,7 +443,7 @@ ID 反查条目」，两边都对——第 1 章那段日志对照就是这个�
 ## 10. 开发
 
 ```bash
-PYTHONPATH=src python -m unittest discover -s tests   # 132 个用例，全部离线（未 pip install -e . 时）
+PYTHONPATH=src python -m unittest discover -s tests   # 143 个用例，全部离线（未 pip install -e . 时）
 ```
 
 CI 在 Python 3.8 / 3.10 / 3.12 上跑同一套测试。目录结构：

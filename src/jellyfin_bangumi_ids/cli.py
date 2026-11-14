@@ -9,32 +9,45 @@ import time
 from typing import Any, Dict, List, Optional
 
 from . import __version__
+from . import settings
 from .anchor import run_anchor, run_seasons
 from .auto import scan_auto
 from .bangumi import Bangumi
 from .jellyfin import Jellyfin
-from .offline import archive_hint, ArchiveIndex, OfflineBangumi, find_archive
+from .offline import (attempts, archive_hint, ArchiveIndex, OfflineBangumi, find_archive)
 from .scan import apply_report, log, rollback, run_scan, run_specials
 from .season import load_mapping, scan_seasons
 from .sync import run_sync
 from .transport import force_ipv4
 from .verify import fail_on_breaches, run_verify, run_verify_offline
 
-DEFAULT_URL = os.environ.get("JF_URL", "http://127.0.0.1:8096")
-DEFAULT_KEY = os.environ.get("JF_API_KEY", "")
+DEFAULT_URL = "http://127.0.0.1:8096"
 
 
 def common(parser: argparse.ArgumentParser) -> None:
-    parser.add_argument("--url", default=DEFAULT_URL, help="Jellyfin base URL (env JF_URL)")
-    parser.add_argument("--api-key", default=DEFAULT_KEY, help="Jellyfin API key (env JF_API_KEY)")
+    parser.add_argument("--url", default=None,
+                        help="Jellyfin base URL (default: JF_URL, then the config file)")
+    parser.add_argument("--api-key", default=os.environ.get("JF_API_KEY", ""),
+                        help="Jellyfin API key (env JF_API_KEY)")
     parser.add_argument("--ipv4", action="store_true",
                         help="force IPv4 lookups (fixes 20 s hangs on hosts with broken IPv6)")
     parser.add_argument("--timeout", type=float, default=20.0)
     parser.add_argument("--archive", metavar="DIR",
                         help="Bangumi plugin archive directory (default: auto-detect, env JBMID_ARCHIVE)")
+    parser.add_argument("--archive-root", metavar="DIR",
+                        help="host directory that contains Jellyfin's data mount, used to map "
+                             "container paths such as /config/... (env JBMID_ARCHIVE_ROOT)")
+    parser.add_argument("--search-archive", action="store_true",
+                        help="also look for bangumi/archive below --archive-root (slower)")
     parser.add_argument("--no-archive", action="store_true",
                         help="ignore the offline archive and always call api.bgm.tv")
     parser.add_argument("-v", "--verbose", action="store_true")
+
+
+def server_url(args: argparse.Namespace) -> str:
+    url = args.url or os.environ.get("JF_URL") or settings.load().get("url") or DEFAULT_URL
+    args.url = url
+    return url
 
 
 def clients(args: argparse.Namespace):
@@ -42,7 +55,7 @@ def clients(args: argparse.Namespace):
         force_ipv4()
     if not args.api_key:
         raise SystemExit("missing API key: pass --api-key or set JF_API_KEY")
-    jf = Jellyfin(args.url, args.api_key, timeout=args.timeout)
+    jf = Jellyfin(server_url(args), args.api_key, timeout=args.timeout)
     bgm = Bangumi(timeout=max(args.timeout, 10))
     return jf, bgm
 
@@ -51,7 +64,11 @@ def data_source(args: argparse.Namespace, jf) -> Optional[str]:
     """Resolved archive directory, or None when the online API is in charge."""
     if getattr(args, "no_archive", False):
         return None
-    return find_archive(jf, getattr(args, "archive", None))
+    configured = settings.load().get("archive")
+    extra = [("config", configured)] if configured else []
+    return find_archive(jf, getattr(args, "archive", None),
+                        root=getattr(args, "archive_root", None),
+                        search=getattr(args, "search_archive", False), extra=extra)
 
 
 def clients_with_source(args: argparse.Namespace):
@@ -258,10 +275,17 @@ def cmd_doctor(args: argparse.Namespace) -> int:
     else:
         hint = archive_hint(jf)
         if hint:
-            print("archive   : %s (not readable from here; pass --archive DIR)"
-                  % hint)
+            print("archive   : %s (not readable from here)" % hint)
         else:
             print("archive   : none (online only)")
+        for item in attempts():
+            print("            tried %s (%s) -> %s" % (item["path"], item["label"], item["status"]))
+        root = getattr(args, "archive_root", None)
+        if not root:
+            print("            if Jellyfin runs in Docker, pass --archive-root DIR so a "
+                  "container path like /config/data/bangumi/archive can be mapped")
+    if not archive:
+        print("config    : %s" % settings.config_path())
     libs = jf.libraries()
     print("libraries : %d (%s)" % (len(libs), ", ".join(libs)) if libs else "libraries : none")
     start = time.time()
@@ -278,6 +302,29 @@ def cmd_doctor(args: argparse.Namespace) -> int:
             config.get("TrustExistedBangumiId"), config.get("ReportPlaybackStatusToBangumi")))
     else:
         print("plugin    : Bangumi plugin not found or not configured")
+    return 0
+
+
+def cmd_config(args: argparse.Namespace) -> int:
+    for key in args.unset or []:
+        settings.unset(key)
+        print("unset     : %s" % key)
+    values = {}
+    for key in ("archive", "archive_root", "url"):
+        value = getattr(args, key, None)
+        if value:
+            values[key] = os.path.abspath(os.path.expanduser(value)) if key != "url" else value
+    if values:
+        settings.save(values)
+        print("saved     : %s" % ", ".join(sorted(values)))
+    data = settings.load()
+    print("config    : %s (%s)" % (settings.config_path(),
+                                   "exists" if os.path.exists(settings.config_path()) else "missing"))
+    for key in settings.KEYS:
+        print("%-13s: %s" % (key, data.get(key) or "(unset)"))
+    if not data:
+        print("")
+        print("example   : jbmid config --archive-root /vol1/1000/Docker/Jellyfin")
     return 0
 
 
@@ -427,6 +474,15 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("doctor", help="check connectivity and plugin state")
     common(p)
     p.set_defaults(func=cmd_doctor)
+
+    p = sub.add_parser("config", help="remember the archive path or the server URL")
+    p.add_argument("--archive", metavar="DIR", help="Bangumi plugin archive directory")
+    p.add_argument("--archive-root", metavar="DIR",
+                   help="host directory that contains Jellyfin's data mount")
+    p.add_argument("--url", help="Jellyfin base URL")
+    p.add_argument("--unset", action="append", choices=list(settings.KEYS), metavar="KEY",
+                   help="remove a stored value (archive / archive_root / url)")
+    p.set_defaults(func=cmd_config)
     return parser
 
 

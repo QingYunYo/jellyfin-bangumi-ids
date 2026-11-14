@@ -18,11 +18,14 @@ import os
 import sqlite3
 import sys
 import tempfile
-from typing import Any, Dict, List, Optional
+import time
+from typing import Any, Dict, List, Optional, Tuple
 
 from .bangumi import Bangumi
 
 ARCHIVE_ENV = "JBMID_ARCHIVE"
+ARCHIVE_ROOT_ENV = "JBMID_ARCHIVE_ROOT"
+ARCHIVE_SEARCH_ENV = "JBMID_ARCHIVE_SEARCH"
 CACHE_ENV = "JBMID_CACHE"
 VERSION = "2"
 
@@ -95,21 +98,115 @@ def _candidates_from_repo() -> List[str]:
     return out
 
 
-def find_archive(jf=None, explicit: Optional[str] = None) -> Optional[str]:
-    """Explicit flag → env var → repo-local copy → Jellyfin's data path → nothing."""
-    for path in (explicit, os.environ.get(ARCHIVE_ENV)):
-        if looks_like_archive(path):
-            return os.path.abspath(os.path.expanduser(path))
-        if path:
-            return None  # user pointed somewhere wrong: do not guess instead
-    for path in _candidates_from_repo():
-        if looks_like_archive(path):
-            return os.path.abspath(path)
-    if jf is not None:
-        for path in _candidates_from_jellyfin(jf):
-            if looks_like_archive(path):
-                return os.path.abspath(path)
+def _candidates_from_root(root: Optional[str], remote: List[str]) -> List[str]:
+    """Translate paths that point inside a container onto the host filesystem.
+
+    Jellyfin reports paths as its own process sees them (``/config/...`` inside
+    Docker).  Given the host directory that mount lives in, a remote path can be
+    found by joining it whole, by dropping its first segment, or by keeping only
+    its last three segments.
+    """
+    if not root:
+        return []
+    root = os.path.abspath(os.path.expanduser(root))
+    out = []
+    for remote_path in remote:
+        parts = [p for p in remote_path.replace("\\", "/").split("/") if p]
+        if not parts:
+            continue
+        for variant in (parts, parts[1:], parts[-3:]):
+            if not variant:
+                continue
+            candidate = os.path.join(root, *variant)
+            if candidate not in out:
+                out.append(candidate)
+    return out
+
+
+def search_archive(root: str, max_depth: int = 5, seconds: float = 3.0) -> Optional[str]:
+    """Look for ``.../bangumi/archive`` below ``root`` (bounded walk)."""
+    root = os.path.abspath(os.path.expanduser(root))
+    if not os.path.isdir(root):
+        return None
+    started = time.time()
+    skip = {".git", "node_modules", "@eaDir", "#recycle", ".cache", "venv", ".venv"}
+    for dirpath, dirnames, _ in os.walk(root):
+        depth = dirpath[len(root):].count(os.sep)
+        if depth >= max_depth:
+            dirnames[:] = []
+        else:
+            dirnames[:] = [d for d in dirnames if d not in skip and not d.startswith(".")]
+        if os.path.basename(dirpath) == "archive" and os.path.basename(os.path.dirname(dirpath)) == "bangumi":
+            if looks_like_archive(dirpath):
+                return os.path.abspath(dirpath)
+        if time.time() - started > seconds:
+            return None
     return None
+
+
+LAST_ATTEMPTS: List[Dict[str, str]] = []
+
+
+def attempts() -> List[Dict[str, str]]:
+    """Every path the last :func:`find_archive` looked at, and why it failed."""
+    return [dict(item) for item in LAST_ATTEMPTS]
+
+
+def _probe(label: str, path: Optional[str]) -> Optional[str]:
+    if not path:
+        return None
+    full = os.path.abspath(os.path.expanduser(path))
+    if looks_like_archive(full):
+        LAST_ATTEMPTS.append({"label": label, "path": full, "status": "ok"})
+        return full
+    status = "missing" if not os.path.exists(full) else "unreadable"
+    LAST_ATTEMPTS.append({"label": label, "path": full, "status": status})
+    return None
+
+
+def find_archive(jf=None, explicit: Optional[str] = None, root: Optional[str] = None,
+                 search: bool = False, extra: Optional[List[Tuple[str, str]]] = None) -> Optional[str]:
+    """Locate the plugin archive.
+
+    Order: ``--archive`` -> ``JBMID_ARCHIVE`` -> extra (config file) -> a copy
+    inside the checkout -> the host equivalent of Jellyfin's data path (via
+    ``--archive-root`` / ``JBMID_ARCHIVE_ROOT``) -> Jellyfin's own path.
+
+    A path that was given but is unusable is recorded and skipped instead of
+    aborting the search: one stale environment variable must not silently send
+    a slow online run at the user.
+    """
+    del LAST_ATTEMPTS[:]
+    for label, path in (("--archive", explicit), (ARCHIVE_ENV, os.environ.get(ARCHIVE_ENV))):
+        found = _probe(label, path)
+        if found:
+            return found
+    for label, path in extra or []:
+        found = _probe(label, path)
+        if found:
+            return found
+    for label, path in (("repo", p) for p in _candidates_from_repo()):
+        found = _probe(label, path)
+        if found:
+            return found
+    remote = _candidates_from_jellyfin(jf) if jf is not None else []
+    root = root or os.environ.get(ARCHIVE_ROOT_ENV)
+    if root and remote:
+        for label, path in (("archive-root", p) for p in _candidates_from_root(root, remote)):
+            found = _probe(label, path)
+            if found:
+                return found
+    if jf is not None:
+        for path in remote:
+            found = _probe("jellyfin", path)
+            if found:
+                return found
+    if root and (search or os.environ.get(ARCHIVE_SEARCH_ENV)):
+        found = _probe("search", search_archive(root))
+        if found:
+            return found
+    return None
+
 
 
 class ArchiveIndex:
