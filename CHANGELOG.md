@@ -2,6 +2,11 @@
 
 版本号从 0.1.0 起，按补丁号递增。
 
+## 未发布
+
+- 文档：README 中英两版新增「署名 / Attribution」一节，标明本项目使用
+  [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) 开发与维护，并附官方 badge。
+
 ## 0.1.5（2026-11-15）
 
 ### 首次设置的顺序与校验

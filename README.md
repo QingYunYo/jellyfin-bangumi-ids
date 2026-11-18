@@ -606,6 +606,12 @@ src/jellyfin_bangumi_ids/
 发版：改 `pyproject.toml` 与 `__init__.py` 的版本号 → 更新 `CHANGELOG.md` → 打注记标签 → 在 GitHub
 Release 附 wheel。
 
+## 署名
+
+本项目的开发与维护使用了 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)。
+
+[![](https://img.shields.io/badge/powered_by-dsh-4D6BFE?style=flat-square&logo=deepseek&logoColor=white)](https://github.com/deepseek-ai/deepseek-harness)
+
 ## License
 
 MIT

@@ -648,6 +648,12 @@ src/jellyfin_bangumi_ids/
 Releasing: bump the version in `pyproject.toml` and `__init__.py` → update `CHANGELOG.md` → tag → attach the
 wheel to a GitHub release.
 
+## Attribution
+
+Built and maintained with [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness).
+
+[![](https://img.shields.io/badge/powered_by-dsh-4D6BFE?style=flat-square&logo=deepseek&logoColor=white)](https://github.com/deepseek-ai/deepseek-harness)
+
 ## License
 
 MIT
