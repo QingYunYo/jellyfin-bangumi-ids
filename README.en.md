@@ -22,6 +22,7 @@ video files, never other metadata.
 - [7. FAQ](#7-faq)
 - [8. How it works](#8-how-it-works)
 - [9. Development](#9-development)
+- [Attribution](#attribution)
 - [License](#license)
 
 ## 1. Install and first run
