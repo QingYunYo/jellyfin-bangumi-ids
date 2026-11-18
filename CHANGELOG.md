@@ -2,12 +2,14 @@
 
 版本号从 0.1.0 起，按补丁号递增。
 
-## 未发布
+## 0.1.5.1（2026-11-19）
 
 - 文档：README 中英两版新增「署名 / Attribution」一节，标明本项目使用
   [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) 开发与维护，并附官方 badge。
 - 文档：入口统一写成 `jbmid` / `./jbmid`，不再让 `jbmid wizard` 出现在开头和表格里；
   `--write`、`--yes`、`--lang` 现在顶层也认（`jbmid --lang en`、`jbmid --yes`），不用写子命令名。
+- 内部：补 `BareEntryTest`，覆盖顶层 `--write/--yes/--lang` 到向导的映射；发布前跑过 18 条
+  命令行矩阵（帮助/版本/裸跑/写模式/子命令兼容/退出码）与 232 个用例。
 
 ## 0.1.5（2026-11-15）
 
