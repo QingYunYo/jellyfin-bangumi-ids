@@ -6,6 +6,8 @@
 
 - 文档：README 中英两版新增「署名 / Attribution」一节，标明本项目使用
   [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) 开发与维护，并附官方 badge。
+- 文档：入口统一写成 `jbmid` / `./jbmid`，不再让 `jbmid wizard` 出现在开头和表格里；
+  `--write`、`--yes`、`--lang` 现在顶层也认（`jbmid --lang en`、`jbmid --yes`），不用写子命令名。
 
 ## 0.1.5（2026-11-15）
 

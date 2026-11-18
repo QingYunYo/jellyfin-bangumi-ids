@@ -8,7 +8,7 @@ Fill in the correct `ProviderIds.Bangumi` on every episode **and every season** 
 Bangumi plugin reports progress against the right subject. It changes that one field — never your
 video files, never other metadata.
 
-**Just want to see it work?** Run `jbmid wizard` (`./jbmid wizard` from a checkout) and pick
+**Just want to see it work?** Run `jbmid` (`./jbmid` from a checkout) and pick
 "1 check" — read-only.
 
 ## Contents
@@ -81,7 +81,7 @@ a 401/403 re-asks the key, anything else gives you a choice.
 
 ### 1.2 Then: the menu, or the subcommands
 
-Run `jbmid` (the same as `jbmid wizard`) and you get the eight-entry menu. On a first run go
+Run `jbmid` and you get the eight-entry menu. On a first run go
 "1 check → 2 episode ids → 3 season ids", and use "6 rollback" if something looks wrong:
 
 ```text
@@ -180,7 +180,7 @@ below is grouped by how much it touches; individual modes are 3.1–3.10, and
 
 | Group | Mode | What it does | Writes? |
 | --- | --- | --- | --- |
-| entry | `jbmid` (= `wizard`) | menu: check / episodes / seasons / specials / one-shot / rollback / one series / config | preview first |
+| entry | `jbmid` (`./jbmid` in a checkout) | menu: check / episodes / seasons / specials / one-shot / rollback / one series / config | preview first |
 | read-only | `doctor` | connectivity / data source / plugin state | read-only |
 | read-only | `verify` | audit episode and season IDs | read-only |
 | report only | `scan` | find anchors, align the whole library by episode title | report only |
@@ -196,17 +196,15 @@ below is grouped by how much it touches; individual modes are 3.1–3.10, and
 
 ### 3.1 Just run `jbmid`: the menu is the entry point
 
-**You do not need to remember `wizard`**: typing `jbmid` (or the checkout's `./jbmid`) *is* the menu, and
-`jbmid wizard` is only the same thing spelled out — they are equivalent. Every write is previewed first
-and then asked again, and the default answer is "no". With no config yet it walks you through setup
+Typing `jbmid` (or the checkout's `./jbmid`) *is* the menu. Every write is previewed first and then
+asked again, and the default answer is "no". With no config yet it walks you through setup
 (see 1.1); `jbmid setup` redoes that.
 
 ```bash
-jbmid                   # same as jbmid wizard; first run goes through setup
-jbmid wizard            # the same entry point, long form
-jbmid wizard --lang en  # English menu
-jbmid wizard --write    # default the write prompts to yes (it still previews, still asks)
-jbmid wizard --yes      # non-interactive: take every default, never write (smoke test only)
+jbmid              # just run it; first run goes through setup
+jbmid --lang en    # English menu
+jbmid --write      # default the write prompts to yes (it still previews, still asks)
+jbmid --yes        # non-interactive: take every default, never write (smoke test only)
 ```
 
 Eight entries: check, fix episode ids, fix season ids, fix specials, one-shot, rollback, one series,
@@ -584,14 +582,14 @@ series are skipped by season alignment.
 
 **Q12. Will the menus speak English on my English system?**
 Yes. Menus, prompts and error messages follow `LANG`: `zh*` → Chinese, any other valid locale →
-English, `C`/`POSIX`/unset → Chinese. Force it with `JBMID_LANG=zh|en` or `jbmid wizard --lang en`.
+English, `C`/`POSIX`/unset → Chinese. Force it with `JBMID_LANG=zh|en` or `jbmid --lang en`.
 Matching itself is unaffected: Bangumi episode titles are Japanese/Chinese, so English-language live
 action usually matches per episode while English fansubs of anime rely more on "same episode count →
 ordered mapping".
 
-**Q13. Can the wizard run from cron?**
-No. Without a terminal it refuses and exits 2 — use the subcommands (e.g. `jbmid sync --library Anime`),
-or `jbmid wizard --yes` (all defaults, never writes, smoke tests only).
+**Q13. Can it run from cron?**
+No. Without a terminal `jbmid` refuses and exits 2 — use the subcommands (e.g. `jbmid sync --library Anime`),
+or `jbmid --yes` (all defaults, never writes, smoke tests only).
 
 ## 8. How it works
 

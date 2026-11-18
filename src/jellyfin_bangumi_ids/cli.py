@@ -432,9 +432,13 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--version", action="version", version="jbmid " + __version__)
     parser.add_argument("-v", "--verbose", action="store_true", dest="verbose_global",
                         help="print every HTTP request (also accepted after a subcommand)")
+    parser.add_argument("--write", dest="write_global", action="store_true",
+                        help="bare `jbmid`: default the write prompts to yes")
+    parser.add_argument("--yes", dest="yes_global", action="store_true",
+                        help="bare `jbmid`: take every default, never write (smoke test)")
     parser.add_argument("--lang", choices=("zh", "en"),
                         help="interface language for the menus and for this run; stored for next time")
-    sub = parser.add_subparsers(dest="command", required=True)
+    sub = parser.add_subparsers(dest="command")  # a bare `jbmid` means the menu
 
     p = sub.add_parser("scan", help="scan a library and write a report")
     common(p)
@@ -667,6 +671,19 @@ def _explain(exc: Exception) -> None:
     print(words["other"] % text, file=sys.stderr)
 
 
+def _wizard_args(args: Optional[argparse.Namespace]) -> argparse.Namespace:
+    """Namespace for a bare `jbmid` (flags at the top level, everything else default)."""
+    get = (lambda k: getattr(args, k, None)) if args is not None else (lambda k: None)
+    return argparse.Namespace(
+        url=get("url"), api_key=get("api_key"), ipv4=get("ipv4") or False,
+        timeout=get("timeout") or 20.0, archive=get("archive"),
+        archive_root=get("archive_root"), search_archive=bool(get("search_archive")),
+        no_archive=bool(get("no_archive")), verbose=bool(get("verbose")),
+        verbose_global=bool(get("verbose_global")), lang=get("lang"),
+        yes=bool(get("yes_global")), write=bool(get("write_global")),
+        backup_dir=None, out_dir=None)
+
+
 def main(argv: Optional[List[str]] = None) -> int:
     parser = build_parser()
     raw = sys.argv[1:] if argv is None else list(argv)
@@ -674,11 +691,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     if not raw:
         if sys.stdin.isatty():
             # First contact: the wizard asks for URL/key once, then shows the menu.
-            return run_wizard(argparse.Namespace(
-                url=None, api_key=None, ipv4=False, timeout=20.0, archive=None,
-                archive_root=None, search_archive=False, no_archive=False, verbose=False,
-                verbose_global=False, lang=None, yes=False, write=False,
-                backup_dir=None, out_dir=None))
+            return run_wizard(_wizard_args(None))
         parser.print_help()
         return 0
     try:
@@ -692,6 +705,8 @@ def main(argv: Optional[List[str]] = None) -> int:
                 settings.save({"lang": args.lang})
             except OSError:
                 pass
+        if getattr(args, "func", None) is None:
+            return run_wizard(_wizard_args(args))
         return args.func(args)
     except KeyboardInterrupt:
         log("interrupted")

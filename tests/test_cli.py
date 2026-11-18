@@ -29,6 +29,17 @@ class MissingKeyTest(unittest.TestCase):
         self.assertEqual(code, 2)
 
 
+class BareEntryTest(unittest.TestCase):
+    def test_top_level_flags_reach_the_menu(self):
+        args = cli.build_parser().parse_args(["--write", "--yes", "--lang", "en"])
+        self.assertIsNone(getattr(args, "func", None))
+        ns = cli._wizard_args(args)
+        self.assertTrue(ns.write)
+        self.assertTrue(ns.yes)
+        self.assertEqual(ns.lang, "en")
+        self.assertEqual(ns.timeout, 20.0)
+
+
 class StoredKeyTest(unittest.TestCase):
     """The key can come from the config file, so nothing has to be exported."""
 
