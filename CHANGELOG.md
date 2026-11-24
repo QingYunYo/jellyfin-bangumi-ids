@@ -2,6 +2,21 @@
 
 版本号从 0.1.0 起，按补丁号递增。
 
+## 0.1.6（2026-11-24）
+
+### 离线档案与存储
+- **宿主机常见标准路径自动探测**：在回落在线 API 前，自动尝试常见系统安装目录（Windows `%ProgramData%\Jellyfin\Server\data\bangumi\archive`、Linux/Docker `/config/data/bangumi/archive` 与 `/var/lib/jellyfin/...`、macOS `~/Library/Application Support/jellyfin/...`），降低手动配置 `--archive` 门槛。
+- **旧索引缓存自清理**：`ArchiveIndex.build()` 成功生成新 SQLite 索引后，自动清理同目录中同名档案历史留存的其他旧 digest 索引文件，防止 `~/.cache` 磁盘无界增长。
+
+### 命令行入口与校验
+- **顶层参数补齐**：裸跑 `jbmid` 顶层统一支持 `--ipv4`、`--no-archive`、`--archive`、`--archive-root`、`--search-archive`，透传至向导，不再误报 `unrecognized arguments`。
+- **配置子命令互斥检查**：`jbmid config` 同时传入 `--archive` 与 `--archive-root` 时明确拒绝并报错退出，防止参数静默覆盖；`--unset` 帮助文案补齐 `lang` 与 `ipv4`。
+- **错误提示去硬编码与双语**：路径检查移除个人特定 NAS 路径示例，改为通用示例，并根据当前语言环境输出中英文错误提示。
+
+### 测试与工程
+- **测试环境隔离**：修复 `StoredKeyTest` 等单元测试受外部 `JF_URL` 等环境变量污染导致的假失败，测试套件增加到 235 个用例且完全环境免疫。
+- **CI 矩阵扩展**：GitHub Actions 测试工作流增加 `windows-latest`（Python 3.10）跨平台验证，并新增 `Smoke test CLI` 步骤覆盖 `jbmid --version` 与 `--help`。
+
 ## 0.1.5.1（2026-11-19）
 
 - 文档：README 中英两版新增「署名 / Attribution」一节，标明本项目使用

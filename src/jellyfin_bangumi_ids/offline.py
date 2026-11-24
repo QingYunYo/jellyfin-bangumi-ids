@@ -118,6 +118,22 @@ def _candidates_from_repo() -> List[str]:
     return [os.path.join(repo, "_local", "archive")]
 
 
+def _candidates_from_common_host() -> List[str]:
+    """Well-known standard directories where Jellyfin or its container puts data."""
+    candidates = []
+    if sys.platform.startswith("win"):
+        prog_data = os.environ.get("ProgramData", r"C:\ProgramData")
+        candidates.append(os.path.join(prog_data, "Jellyfin", "Server", "data", "bangumi", "archive"))
+    else:
+        candidates.extend([
+            "/config/data/bangumi/archive",
+            "/var/lib/jellyfin/data/bangumi/archive",
+            "/var/lib/jellyfin/bangumi/archive",
+            os.path.expanduser("~/Library/Application Support/jellyfin/data/bangumi/archive"),
+        ])
+    return candidates
+
+
 def _candidates_from_root(root: Optional[str], remote: List[str]) -> List[str]:
     """Translate paths that point inside a container onto the host filesystem.
 
@@ -241,6 +257,10 @@ def find_archive(jf=None, explicit: Optional[str] = None, root: Optional[str] = 
         found = _probe("search", search_archive(root))
         if found:
             return _done(found)
+    for path in _candidates_from_common_host():
+        found = _probe("host", path)
+        if found:
+            return _done(found)
     if explicit_bad:
         print("ignore        : --archive %s is unusable; falling back to the online API"
               % explicit, file=sys.stderr)
@@ -322,6 +342,22 @@ class ArchiveIndex:
         conn.commit()
         conn.close()
         os.replace(tmp, self.db_path)
+        self._cleanup_old_indices()
+
+    def _cleanup_old_indices(self) -> None:
+        """Remove older SQLite indexes for the same archive directory."""
+        safe = "".join(ch if ch.isalnum() else "-" for ch in os.path.basename(self.dir) or "archive")
+        prefix = "archive-%s-" % safe
+        current = os.path.basename(self.db_path)
+        try:
+            for name in os.listdir(self.cache_dir):
+                if name.startswith(prefix) and name.endswith(".sqlite") and name != current:
+                    try:
+                        os.remove(os.path.join(self.cache_dir, name))
+                    except OSError:
+                        pass
+        except OSError:
+            pass
 
     def _open(self) -> sqlite3.Connection:
         if self._conn is None:

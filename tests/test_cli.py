@@ -31,12 +31,20 @@ class MissingKeyTest(unittest.TestCase):
 
 class BareEntryTest(unittest.TestCase):
     def test_top_level_flags_reach_the_menu(self):
-        args = cli.build_parser().parse_args(["--write", "--yes", "--lang", "en"])
+        args = cli.build_parser().parse_args([
+            "--write", "--yes", "--lang", "en", "--ipv4", "--no-archive",
+            "--archive", "/tmp/a", "--archive-root", "/tmp/r", "--search-archive"
+        ])
         self.assertIsNone(getattr(args, "func", None))
         ns = cli._wizard_args(args)
         self.assertTrue(ns.write)
         self.assertTrue(ns.yes)
         self.assertEqual(ns.lang, "en")
+        self.assertTrue(ns.ipv4)
+        self.assertTrue(ns.no_archive)
+        self.assertEqual(ns.archive, "/tmp/a")
+        self.assertEqual(ns.archive_root, "/tmp/r")
+        self.assertTrue(ns.search_archive)
         self.assertEqual(ns.timeout, 20.0)
 
 
@@ -48,7 +56,8 @@ class StoredKeyTest(unittest.TestCase):
         from jellyfin_bangumi_ids import settings
         self.tmp = tempfile.TemporaryDirectory()
         self.env = mock.patch.dict(os.environ, {"JBMID_CONFIG_DIR": self.tmp.name,
-                                                "JF_API_KEY": ""})
+                                                "JF_API_KEY": "",
+                                                "JF_URL": ""})
         self.env.start()
         self.addCleanup(self.env.stop)
         self.addCleanup(self.tmp.cleanup)
@@ -115,3 +124,14 @@ class StoredIpv4Test(unittest.TestCase):
                 mock.patch.object(cli, "force_ipv4", lambda: calls.append(1)):
             cli.clients(args)
         self.assertEqual(calls, [])
+
+
+class ConfigConflictTest(unittest.TestCase):
+    def test_archive_and_archive_root_conflict(self):
+        buf = io.StringIO()
+        args = cli.build_parser().parse_args(["config", "--archive", "/tmp/a", "--archive-root", "/tmp/r"])
+        with redirect_stderr(buf):
+            code = cli.cmd_config(args)
+        self.assertEqual(code, 1)
+        err = buf.getvalue().lower()
+        self.assertTrue("cannot pass both" in err or "不能同时指定" in err)

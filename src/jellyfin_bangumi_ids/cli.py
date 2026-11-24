@@ -336,16 +336,23 @@ def cmd_wizard(args: argparse.Namespace) -> int:
 def _checked_path(raw: str, want_archive: bool) -> Optional[str]:
     """Absolute + existing; an archive must really hold the plugin's jsonlines."""
     path = os.path.expanduser(raw.strip())
+    is_zh = language() == "zh"
     if not os.path.isabs(path):
-        print("use an absolute path, e.g. /vol1/1000/Docker/Jellyfin/config/data/bangumi/archive",
-              file=sys.stderr)
+        example = "/path/to/jellyfin/config/data/bangumi/archive"
+        msg = ("请使用绝对路径，例如 %s" if is_zh else
+               "use an absolute path, e.g. %s") % example
+        print(msg, file=sys.stderr)
         return None
     path = os.path.normpath(path)
     if not os.path.isdir(path):
-        print("no such directory: %s" % path, file=sys.stderr)
+        msg = ("目录不存在: %s" if is_zh else
+               "no such directory: %s") % path
+        print(msg, file=sys.stderr)
         return None
     if want_archive and not looks_like_archive(path):
-        print("not a Bangumi archive (episode.jsonlines is missing): %s" % path, file=sys.stderr)
+        msg = ("不是有效的 Bangumi 离线档案 (缺少 episode.jsonlines): %s" if is_zh else
+               "not a Bangumi archive (episode.jsonlines is missing): %s") % path
+        print(msg, file=sys.stderr)
         return None
     return path
 
@@ -356,8 +363,14 @@ def cmd_config(args: argparse.Namespace) -> int:
     for key in args.unset or []:
         settings.unset(key)
         print("unset     : %s" % key)
-    values = {}
     archive = getattr(args, "archive", None)
+    root = getattr(args, "archive_root", None)
+    if archive and root:
+        msg = ("错误：不能同时指定 --archive 和 --archive-root" if language() == "zh"
+               else "error: cannot pass both --archive and --archive-root")
+        print(msg, file=sys.stderr)
+        return 1
+    values = {}
     if archive:
         path = _checked_path(archive, want_archive=True)
         if path is None:
@@ -438,6 +451,16 @@ def build_parser() -> argparse.ArgumentParser:
                         help="bare `jbmid`: take every default, never write (smoke test)")
     parser.add_argument("--lang", choices=("zh", "en"),
                         help="interface language for the menus and for this run; stored for next time")
+    parser.add_argument("--ipv4", action="store_true",
+                        help="force IPv4 lookups (fixes 20 s hangs on hosts with broken IPv6)")
+    parser.add_argument("--no-archive", action="store_true",
+                        help="ignore the offline archive and always call api.bgm.tv")
+    parser.add_argument("--archive", metavar="DIR",
+                        help="Bangumi plugin archive directory")
+    parser.add_argument("--archive-root", metavar="DIR",
+                        help="host directory that contains Jellyfin's data mount")
+    parser.add_argument("--search-archive", action="store_true",
+                        help="also look for bangumi/archive below --archive-root (slower)")
     sub = parser.add_subparsers(dest="command")  # a bare `jbmid` means the menu
 
     p = sub.add_parser("scan", help="scan a library and write a report")
@@ -611,7 +634,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--lang", choices=("zh", "en"), default=argparse.SUPPRESS,
                    help="interface language, stored for next time")
     p.add_argument("--unset", action="append", choices=list(settings.KEYS), metavar="KEY",
-                   help="remove a stored value (url / api_key / archive / archive_root)")
+                   help="remove a stored value (url / api_key / archive / archive_root / lang / ipv4)")
     p.set_defaults(func=cmd_config)
 
     p = sub.add_parser("setup", help="first-run setup: Jellyfin URL, API key, offline archive")

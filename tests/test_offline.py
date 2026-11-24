@@ -223,5 +223,29 @@ class ArchiveTestCase(unittest.TestCase):
             self.assertIsNone(find_archive(None, blocker))
         self.assertEqual(offline.attempts()[0]["status"], "unreadable")
 
+    def test_common_host_candidate_detected(self):
+        nested = os.path.join(self.tmp, "custom_host", "data", "bangumi", "archive")
+        write_archive(nested, SUBJECTS, EPISODES)
+        with self.no_repo_archive(), mock.patch.object(offline, "_candidates_from_common_host", lambda: [nested]):
+            self.assertEqual(find_archive(None), os.path.abspath(nested))
+
+    def test_cleanup_old_indices(self):
+        # Create an archive and index it
+        idx = ArchiveIndex(self.dir, cache_dir=self.cache)
+        idx.build()
+        self.assertTrue(os.path.exists(idx.db_path))
+        
+        # Create an older fake index for the same archive directory
+        safe = "".join(ch if ch.isalnum() else "-" for ch in os.path.basename(self.dir) or "archive")
+        old_idx = os.path.join(self.cache, f"archive-{safe}-oldfake0000.sqlite")
+        with open(old_idx, "w") as fh:
+            fh.write("fake")
+        self.assertTrue(os.path.exists(old_idx))
+        
+        # Build again (or call cleanup)
+        idx._cleanup_old_indices()
+        self.assertFalse(os.path.exists(old_idx))
+        self.assertTrue(os.path.exists(idx.db_path))
+
 if __name__ == "__main__":
     unittest.main()
