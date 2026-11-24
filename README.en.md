@@ -203,6 +203,7 @@ asked again, and the default answer is "no". With no config yet it walks you thr
 ```bash
 jbmid              # just run it; first run goes through setup
 jbmid --lang en    # English menu
+jbmid --ipv4       # force IPv4 (when host IPv6 is blackholed)
 jbmid --write      # default the write prompts to yes (it still previews, still asks)
 jbmid --yes        # non-interactive: take every default, never write (smoke test only)
 ```
@@ -466,6 +467,7 @@ Lookup order (first hit wins):
 5. `--archive-root DIR` / `JBMID_ARCHIVE_ROOT`: map container paths onto the host (below)
 6. Jellyfin's `DataPath` from `/System/Info`, when that path is readable **on this machine**
 7. `--search-archive` / `JBMID_ARCHIVE_SEARCH=1`: a bounded walk under `--archive-root` (fallback, slower)
+8. Well-known standard host directories (e.g. Linux `/config/data/bangumi/archive`, `/var/lib/jellyfin/...`, Windows `%ProgramData%\Jellyfin\...`, macOS)
 
 **Jellyfin in Docker**: the plugin sees container paths such as `/config/data/bangumi/archive`, which do
 not exist on the host. Point the tool at the host directory and it maps them for you:
@@ -490,7 +492,7 @@ prints every path it tried and why it failed (`missing` / `unreadable`) — fix 
 jbmid config --url http://127.0.0.1:8096   # Jellyfin URL (port 8096), not Bangumi
 jbmid config --api-key KEY                 # store the key (plain text, file 0600, masked on display)
 jbmid config --archive DIR                 # archive directory (absolute, with episode.jsonlines)
-jbmid config --archive-root DIR            # Jellyfin's data directory; the archive is derived
+jbmid config --archive-root DIR            # Jellyfin's data directory; derived (mutually exclusive with --archive)
 jbmid config --lang en                     # interface language, stored for next time
 jbmid config --ipv4 on                     # remember to force IPv4 (always on when v6 hangs for 20 s)
 jbmid config --test                        # connect once and print version / users / libraries

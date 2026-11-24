@@ -191,6 +191,7 @@ jbmid verify  --library 动漫                   # 两类一起体检
 ```bash
 jbmid              # 直接跑；没有配置时先进首次设置
 jbmid --lang en    # 英文菜单
+jbmid --ipv4       # 强制 IPv4（宿主 IPv6 不通时开）
 jbmid --write      # 把「确认写入」的默认值改成是（仍然先预览、仍然要你按回车）
 jbmid --yes        # 非交互：全部取默认值，写操作一律不执行，只适合冒烟
 ```
@@ -433,6 +434,7 @@ ID 反查条目」，两边都对——第 2 章那段日志对照就是这个�
 5. `--archive-root DIR` / `JBMID_ARCHIVE_ROOT`：把容器内路径映射到宿主机（见下）
 6. Jellyfin `/System/Info` 报告的 `DataPath` 在**当前机器上直接可读**时自动使用
 7. `--search-archive` / `JBMID_ARCHIVE_SEARCH=1`：在 `--archive-root` 下做有界搜索（兜底，较慢）
+8. 宿主机常见标准路径自动探测（如 Linux `/config/data/bangumi/archive`、`/var/lib/jellyfin/...`、Windows `%ProgramData%\Jellyfin\...`、macOS）
 
 **Jellyfin 跑在 Docker 里**：插件看到的是容器内路径（如 `/config/data/bangumi/archive`），
 在宿主机上并不存在。把宿主目录告诉工具，它会自己映射：
@@ -457,7 +459,7 @@ jbmid doctor
 jbmid config --url http://127.0.0.1:8096   # Jellyfin 地址（默认 8096 端口），不是 Bangumi
 jbmid config --api-key KEY                 # 存 Key（明文，文件 0600；显示时打码）
 jbmid config --archive DIR                 # 档案目录（必须是含 episode.jsonlines 的绝对路径）
-jbmid config --archive-root DIR            # Jellyfin 的 data 目录，自动推导出 archive
+jbmid config --archive-root DIR            # Jellyfin 的 data 目录，自动推导出 archive（与 --archive 互斥）
 jbmid config --lang zh                     # 界面语言，写进配置；`jbmid --lang en` 也可
 jbmid config --ipv4 on                     # 记住强制 IPv4（本机 IPv6 不通、请求卡 20 秒时开）；off 关
 jbmid config --test                        # 用当前配置连一次，打印版本/用户数/库数
